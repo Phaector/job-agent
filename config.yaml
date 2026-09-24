@@ -1,0 +1,241 @@
+# =====================================================================
+#  JOB AGENT CONFIGURATION
+#  Edit this file to tune the agent. API keys never go here:
+#  they live in GitHub Secrets (online) or a .env file (local testing).
+# =====================================================================
+
+models:
+  screen: claude-haiku-4-5-20251001   # cheap first pass over every new posting
+  deep: claude-sonnet-5               # full scoring, cover letters, pattern reports
+
+# ---------------------------------------------------------------------
+# NOTION: names of the properties in "DB Applications".
+# The title property is detected automatically (yours is "Company").
+# Optional properties (Why not, Track) are skipped if they don't exist.
+# ---------------------------------------------------------------------
+notion:
+  properties:
+    job_title: Job Title
+    status: Status
+    link: Reference Link
+    type: Type
+    location: Location          # select field
+    score: Score                # number field
+    date_found: Date Found
+    deadline: Deadline
+    salary: Salary              # number field in dollars: only filled for USD postings
+    next_action: Next Action
+    why_not: Why not            # optional text field: a few words when you mark "Not interested"
+    track: Track                # optional select field: Fashion business / Tech business / Fashion-tech / Wildcard
+  statuses:
+    suggested: Suggested
+    queue: Queue
+    not_interested: Not interested
+    # Statuses that count as "yes" when the agent learns your taste.
+    # Rejected is included: you wanted it, the company said no.
+    counts_as_yes: [To Apply, Applied, Interviewed, Offer, Accepted, Rejected]
+  type_options:
+    job: Job
+    internship: Internship
+  cover_letter_trigger: Cover Letter   # Next Action option that triggers a draft
+
+# ---------------------------------------------------------------------
+# LIMITS
+# ---------------------------------------------------------------------
+limits:
+  suggested_per_run: 10          # best matches that become "Suggested" each morning
+  wildcards_per_run: 3           # extra "Wildcard" roles outside your directions
+  min_score_queue: 6.0           # minimum score to land in Notion at all
+  min_score_wildcard: 7.0
+  min_score_stretch: 9.0         # Paris and Amsterdam need this score
+  queue_cap: 30                  # max rows waiting in "Queue"
+  queue_expiry_days: 14          # Queue rows older than this go to Notion's trash
+  max_posting_age_days: 21
+  max_deep_scores_per_run: 40    # cost control: full scores per morning
+  max_enrich_per_run: 15         # your own added links filled in per run
+  enrich_rows_created_within_days: 10   # only rows you added recently get filled in
+  seen_retention_days: 45        # how long a screened posting is remembered
+  taste_examples_each: 20        # yes/no examples the scorer sees
+
+weights:                         # must add up to 1.0
+  skills_fit: 0.30
+  direction_fit: 0.20
+  growth_onboarding: 0.15
+  taste_match: 0.15
+  feasibility: 0.10
+  freshness: 0.10
+
+# ---------------------------------------------------------------------
+# LOCATIONS: select option name -> words that identify it.
+# Order matters: specific cities before "Belgium – other".
+# ---------------------------------------------------------------------
+locations:
+  main:
+    New York: [new york, nyc, manhattan, brooklyn, queens, long island city, jersey city, hoboken]
+    Antwerp: [antwerp, antwerpen, anvers]
+    Brussels: [brussels, brussel, bruxelles, zaventem, diegem, machelen, vilvoorde]
+    Ghent: [ghent, gent, gand]
+    Leuven: [leuven, louvain]
+    "Belgium – other": [belgium, belgië, belgie, belgique, mechelen, hasselt, bruges, brugge, kortrijk, aalst, lochristi, schellebelle, oudenaarde, sint-niklaas, liège, liege, namur, charleroi, wavre, mons, genk, roeselare]
+  stretch:
+    Paris: [paris, île-de-france, ile-de-france]
+    Amsterdam: [amsterdam]
+  remote_option: Remote
+  remote_ok_regions: [us, usa, united states, belgium, europe, emea, eu, benelux, new york, anywhere, worldwide]
+  europe_options: [Antwerp, Brussels, Ghent, Leuven, "Belgium – other", Paris, Amsterdam]
+
+# ---------------------------------------------------------------------
+# HARD FILTERS (free, applied before any AI call). Title patterns are
+# matched as whole words and may use simple regex like part[- ]time.
+# ---------------------------------------------------------------------
+filters:
+  max_years_required: 2          # postings that clearly ask for 3+ years are dropped
+  exclude_title_patterns:
+    - sales associate
+    - store manager
+    - retail associate
+    - stock associate
+    - cashier
+    - keyholder
+    - client advisor
+    - brand ambassador
+    - boutique
+    - part[- ]time
+    - seasonal
+    - freelance
+    - designer
+    - pattern ?maker
+    - seamstress
+    - tailor
+    - software engineer
+    - data scientist
+    - machine learning engineer
+    - backend
+    - front[- ]?end
+    - full[- ]?stack
+    - devops
+    - verkoper
+    - verkoopster
+    - vendeur
+    - vendeuse
+    - magazijnier
+    - chauffeur
+  senior_title_words: [senior, sr, lead, principal, staff, head, director, vp, vice president, chief, general manager]
+  internship_title_patterns: [intern, interns, internship, stage, stagiair, stagiaire, summer analyst, summer associate, co-op, werkstudent]
+  trainee_title_patterns: [trainee, traineeship, graduate program, graduate programme, graduate scheme, rotational, young graduate, management trainee, leadership development program]
+
+# ---------------------------------------------------------------------
+# SEARCH: Adzuna (free API key) covers US, BE, FR and NL.
+# SerpApi (Google Jobs) is optional; it only runs if SERPAPI_KEY is set,
+# and rotates through its queries a few per day to stay in the free tier.
+# ---------------------------------------------------------------------
+search:
+  adzuna:
+    max_days_old: 7
+    results_per_query: 20
+    countries:
+      us:
+        where: New York
+        terms:
+          - client success associate
+          - customer success associate
+          - partnerships associate
+          - business development associate
+          - implementation specialist
+          - implementation consultant
+          - business operations associate
+          - product development assistant
+          - production coordinator fashion
+          - assistant merchandiser
+          - allocation analyst
+          - assistant buyer
+          - showroom coordinator
+          - wholesale coordinator
+          - fashion tech
+          - graduate program
+      be:
+        where: ""
+        terms:
+          - customer success
+          - implementation consultant
+          - junior business analyst
+          - partnership manager
+          - account manager fashion
+          - product development fashion
+          - productie coördinator
+          - merchandiser
+          - aankoper mode
+          - graduate programme
+          - traineeship
+          - junior consultant
+      fr:
+        where: Paris
+        terms:
+          - customer success
+          - chef de produit junior mode
+          - coordinateur production mode
+          - assistant merchandiser
+          - business developer luxe
+      nl:
+        where: Amsterdam
+        terms:
+          - customer success
+          - implementation consultant
+          - merchandiser fashion
+          - partnerships associate
+  serpapi:
+    max_queries_per_run: 3
+    queries:
+      - {q: "fashion tech partnerships associate", location: "New York, New York, United States", gl: us}
+      - {q: "fashion product development coordinator", location: "New York, New York, United States", gl: us}
+      - {q: "luxury graduate program business", location: "New York, New York, United States", gl: us}
+      - {q: "client success fashion platform", location: "New York, New York, United States", gl: us}
+      - {q: "junior product developer fashion", location: "Belgium", gl: be}
+      - {q: "graduate programme luxury fashion", location: "Belgium", gl: be}
+      - {q: "implementation consultant junior", location: "Belgium", gl: be}
+      - {q: "coordinateur développement produit maroquinerie", location: "Paris, Ile-de-France, France", gl: fr}
+
+# ---------------------------------------------------------------------
+# WATCHLIST: company job boards read straight from their public feeds.
+# Format: board-slug: Display Name. Links already in your Notion DB and
+# in the seeds below are added automatically, so this list only needs
+# companies you want watched before you've saved one of their jobs.
+# ---------------------------------------------------------------------
+watchlist:
+  greenhouse: {}
+  lever: {}
+  ashby: {}
+  workable: {lyst: Lyst}
+  recruitee: {}
+
+# ---------------------------------------------------------------------
+# NEWSLETTER: job links from emails with this Gmail label
+# (only runs if GMAIL_ADDRESS and GMAIL_APP_PASSWORD are set).
+# ---------------------------------------------------------------------
+newsletter:
+  gmail_label: Job newsletters
+  lookback_days: 8
+  max_links: 60
+  source_name: All Things Fashion Tech
+
+# ---------------------------------------------------------------------
+# TASTE SEEDS: your first examples, used until Notion has enough
+# To Apply / Not interested rows of its own. Their companies are also
+# added to the watchlist automatically.
+# ---------------------------------------------------------------------
+seeds:
+  liked:
+    - {company: WGSN, title: Client Success Coordinator, url: "https://jobs.lever.co/wgsn/4fc33f6f-a386-4505-a091-47cbafd164d1"}
+    - {company: SpreeAI, title: Partnerships & Business Development Associate, url: "https://ats.rippling.com/spreeai/jobs/1e4e2b3f-334a-401e-a569-2ece9d1aab23"}
+    - {company: Wolf & Badger, title: Brand Partnerships Associate, url: "https://apply.workable.com/wolfandbadger/j/60543C348E/"}
+    - {company: CLO Virtual Fashion, title: 3D Design & Implementation Specialist, url: "https://jobs.lever.co/clovirtualfashion/9185e4c2-91d3-4d46-86e7-86e1b9eeebde"}
+    - {company: Bold Metrics, title: Implementation Engineer, url: "https://job-boards.greenhouse.io/boldmetrics/jobs/4696097005"}
+    - {company: Vivrelle, title: Associate, Showroom, url: "https://jobs.lever.co/vivrelle/1eea4f74-465b-42b4-b6be-a8420776cfd8"}
+    - {company: AfterShip, title: Business Development Representative, url: "https://job-boards.greenhouse.io/aftership/jobs/6130764004"}
+    - {company: Fashionphile, title: Customer Experience Analyst, url: ""}
+  company_yes_role_too_junior:
+    - {company: Wolf & Badger, title: Sales Associate (part-time), url: "https://apply.workable.com/wolfandbadger/j/85E4AB3BCF/"}
+    - {company: Alvanon, title: Customer Service Admin, url: "https://alvanon.com/careers/customer-service-admin"}
+    - {company: Faume, title: Customer Care Specialist (fixed-term), url: ""}
+  watch_only:
+    - "https://job-boards.greenhouse.io/stockx"

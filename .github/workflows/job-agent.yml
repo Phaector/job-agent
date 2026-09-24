@@ -1,0 +1,69 @@
+name: Job agent
+
+on:
+  schedule:
+    - cron: "0 11 * * *"     # daily search, 7:00 New York summer time (6:00 in winter)
+    - cron: "30 */2 * * *"   # every 2 hours: your added links + cover letters
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to run"
+        type: choice
+        default: daily
+        options: [daily, light, next, patterns]
+      count:
+        description: "Rows to move from Queue to Suggested (mode 'next')"
+        default: "10"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: job-agent
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Pick mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 11 * * *" ]; then
+            echo "mode=daily" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=light" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          NOTION_PROFILE_PAGE_ID: ${{ secrets.NOTION_PROFILE_PAGE_ID }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python main.py --mode "${{ steps.mode.outputs.mode }}" --count "${{ inputs.count || '10' }}"
+
+      - name: Remember screened postings
+        if: steps.mode.outputs.mode == 'daily'
+        run: |
+          git config user.name "job-agent"
+          git config user.email "job-agent@users.noreply.github.com"
+          git add state/seen.json
+          git diff --cached --quiet || (git commit -m "Update screened postings" && git push)
