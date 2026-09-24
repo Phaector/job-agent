@@ -158,7 +158,8 @@ def search_and_score(rows, profile, taste, seen):
                 job["address"] = job.get("address") or full.get("address", "")
                 job["deadline"] = job.get("deadline") or full.get("deadline", "")
         result = scoring.deep_score(job, profile, taste)
-        if not result:
+        if not result:             # not scored: let the next run try again
+            seen.pop(job["norm_url"], None)
             continue
         scoring.apply_result(job, result)
         if job["is_internship"] and job.get("loc_option") in filters.EUROPE:

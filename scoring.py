@@ -33,6 +33,8 @@ def ask(model: str, system: str, user: str, max_tokens: int = 1500) -> str:
             resp = client().messages.create(
                 model=model, max_tokens=max_tokens, system=system,
                 messages=[{"role": "user", "content": user}])
+            if resp.stop_reason == "max_tokens":
+                print(f"    [Claude] answer cut off at {max_tokens} tokens")
             return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
         except (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.InternalServerError) as e:
             wait = 10 * (attempt + 1)
@@ -170,8 +172,9 @@ def deep_score(job: dict, profile: str, taste: str):
     user = (f"TITLE: {job['title']}\nCOMPANY: {job['company']}\nLOCATION: {job['location']}\n"
             f"POSTED: {posted}\nEMPLOYMENT TYPE: {job.get('employment_type') or 'unknown'}\n\n"
             f"POSTING:\n{(job.get('description') or '(no description available)')[:7000]}")
-    result = parse_json(ask(settings.MODEL_DEEP, system, user, 1800), "object")
+    result = parse_json(ask(settings.MODEL_DEEP, system, user, 4000), "object")
     if not isinstance(result, dict) or not isinstance(result.get("subscores"), dict):
+        print(f"    [Score] could not read the answer for {job['title']} @ {job['company']}; retrying next run")
         return None
     return result
 
