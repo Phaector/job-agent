@@ -42,7 +42,13 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "0 11 * * *" ]; then
-            echo "mode=daily" >> "$GITHUB_OUTPUT"
+            # Repo variable SKIP_DAILY_UNTIL (YYYY-MM-DD): skip the daily search up to and including that date
+            if [[ "$(date -u +%F)" < "${{ vars.SKIP_DAILY_UNTIL }}" || "$(date -u +%F)" = "${{ vars.SKIP_DAILY_UNTIL }}" ]]; then
+              echo "Daily search skipped (SKIP_DAILY_UNTIL=${{ vars.SKIP_DAILY_UNTIL }})"
+              echo "mode=light" >> "$GITHUB_OUTPUT"
+            else
+              echo "mode=daily" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "mode=light" >> "$GITHUB_OUTPUT"
           fi
