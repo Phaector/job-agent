@@ -5,6 +5,7 @@ Modes
   light     only your links + cover letters (runs every 2 hours)
   next      move the next N best rows from Queue to Suggested
   patterns  write the monthly patterns report now
+  note      add feedback to your Notion profile page (--note "point one | point two")
 
 Add --dry-run to print what would happen without writing to Notion.
 """
@@ -15,6 +16,7 @@ import time
 from collections import Counter
 
 import filters
+import notion_db
 import scoring
 import settings
 import sources
@@ -225,11 +227,29 @@ def promote_next(db, rows, count):
     print(f"[Queue] Moved {len(queue_rows)} rows to Suggested")
 
 
+def add_profile_note(db, note: str):
+    """Append dated feedback bullets to the Notion profile page, which the scorer reads."""
+    points = [p.strip() for p in note.split("|") if p.strip()]
+    if not points:
+        print("[Note] Nothing to add: pass --note \"point one | point two\"")
+        return
+    if not settings.NOTION_PROFILE_PAGE_ID:
+        print("[Note] NOTION_PROFILE_PAGE_ID is not set")
+        return
+    blocks = [notion_db.heading(f"Feedback {dt.date.today():%Y-%m-%d}", 3)]
+    blocks += [notion_db.bullet(p) for p in points]
+    if db.append_blocks(settings.NOTION_PROFILE_PAGE_ID, blocks):
+        print(f"[Note] Added {len(points)} points to your profile page")
+    else:
+        raise SystemExit("[Note] Could not write to your profile page")
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser(description="Phaedra's job agent")
-    ap.add_argument("--mode", default="daily", choices=["daily", "light", "next", "patterns"])
+    ap.add_argument("--mode", default="daily", choices=["daily", "light", "next", "patterns", "note"])
     ap.add_argument("--count", type=int, default=10, help="rows to promote in mode 'next'")
+    ap.add_argument("--note", default="", help="feedback for mode 'note'; separate points with |")
     ap.add_argument("--dry-run", action="store_true", help="print instead of writing to Notion")
     args = ap.parse_args()
 
@@ -237,6 +257,10 @@ def main():
     db = NotionDB(dry_run=args.dry_run)
     rows = db.all_rows()
     print(f"[Notion] {len(rows)} rows in your database")
+
+    if args.mode == "note":
+        add_profile_note(db, args.note)
+        return
 
     if args.mode == "next":
         promote_next(db, rows, args.count)

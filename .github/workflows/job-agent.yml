@@ -10,10 +10,13 @@ on:
         description: "What to run"
         type: choice
         default: daily
-        options: [daily, light, next, patterns]
+        options: [daily, light, next, patterns, note]
       count:
         description: "Rows to move from Queue to Suggested (mode 'next')"
         default: "10"
+      note:
+        description: "Feedback for your profile page (mode 'note'); separate points with |"
+        default: ""
 
 permissions:
   contents: write
@@ -64,7 +67,8 @@ jobs:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        run: python main.py --mode "${{ steps.mode.outputs.mode }}" --count "${{ inputs.count || '10' }}"
+          NOTE: ${{ inputs.note }}
+        run: python main.py --mode "${{ steps.mode.outputs.mode }}" --count "${{ inputs.count || '10' }}" --note "$NOTE"
 
       - name: Remember screened postings
         if: steps.mode.outputs.mode == 'daily'
