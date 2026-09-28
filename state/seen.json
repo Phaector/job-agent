@@ -159,6 +159,10 @@
 "d": "2026-09-24",
 "s": 3.5
 },
+"adzuna.be/details/5895526617": {
+"d": "2026-09-28",
+"s": null
+},
 "adzuna.be/details/5895527611": {
 "d": "2026-09-24",
 "s": 6.7
@@ -295,6 +299,10 @@
 "d": "2026-09-26",
 "s": null
 },
+"adzuna.be/details/5897959147": {
+"d": "2026-09-28",
+"s": null
+},
 "adzuna.be/details/5897960026": {
 "d": "2026-09-26",
 "s": null
@@ -383,6 +391,14 @@
 "d": "2026-09-27",
 "s": null
 },
+"adzuna.be/details/5900183930": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.be/details/5900183953": {
+"d": "2026-09-28",
+"s": 4.7
+},
 "adzuna.be/details/5900183963": {
 "d": "2026-09-27",
 "s": 3.8
@@ -399,12 +415,24 @@
 "d": "2026-09-27",
 "s": null
 },
+"adzuna.be/details/5900412787": {
+"d": "2026-09-28",
+"s": null
+},
 "adzuna.be/details/5900413065": {
 "d": "2026-09-27",
 "s": null
 },
 "adzuna.be/details/5900540330": {
 "d": "2026-09-27",
+"s": null
+},
+"adzuna.be/details/5900540334": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.be/details/5900540378": {
+"d": "2026-09-28",
 "s": null
 },
 "adzuna.be/details/5900644904": {
@@ -433,6 +461,26 @@
 },
 "adzuna.be/details/5900659374": {
 "d": "2026-09-27",
+"s": null
+},
+"adzuna.be/details/5901248471": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.be/details/5901296635": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.be/details/5901441120": {
+"d": "2026-09-28",
+"s": 5.3
+},
+"adzuna.be/details/5901491307": {
+"d": "2026-09-28",
+"s": 5.4
+},
+"adzuna.be/details/5901781507": {
+"d": "2026-09-28",
 "s": null
 },
 "adzuna.be/land/ad/5894971997": {
@@ -891,6 +939,46 @@
 "d": "2026-09-27",
 "s": null
 },
+"adzuna.com/details/5900823302": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/details/5900861733": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/details/5900930940": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/details/5901005583": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/details/5901005830": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/details/5901273826": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/details/5901418108": {
+"d": "2026-09-28",
+"s": 5.1
+},
+"adzuna.com/details/5901624708": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/details/5901633233": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/details/5901645744": {
+"d": "2026-09-28",
+"s": null
+},
 "adzuna.com/land/ad/5889246913": {
 "d": "2026-09-24",
 "s": null
@@ -1191,6 +1279,62 @@
 "d": "2026-09-27",
 "s": null
 },
+"adzuna.com/land/ad/5901254522": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901257883": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901291455": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901321149": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901419824": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901419894": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901421970": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901502082": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901502253": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901502254": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901502259": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901527980": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901531109": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.com/land/ad/5901676231": {
+"d": "2026-09-28",
+"s": null
+},
 "adzuna.fr/details/5893593134": {
 "d": "2026-09-24",
 "s": null
@@ -1315,8 +1459,72 @@
 "d": "2026-09-27",
 "s": null
 },
+"adzuna.fr/details/5900750333": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5900751088": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5900751432": {
+"d": "2026-09-28",
+"s": 2.4
+},
+"adzuna.fr/details/5900751843": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5900754510": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5900760631": {
+"d": "2026-09-28",
+"s": 7.1
+},
+"adzuna.fr/details/5901073230": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5901124943": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5901306905": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5901320586": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5901691365": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5901701448": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/details/5901712474": {
+"d": "2026-09-28",
+"s": null
+},
 "adzuna.fr/land/ad/5900616305": {
 "d": "2026-09-27",
+"s": null
+},
+"adzuna.fr/land/ad/5901504291": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/land/ad/5901510225": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.fr/land/ad/5901560329": {
+"d": "2026-09-28",
 "s": null
 },
 "adzuna.nl/details/5891927642": {
@@ -1391,6 +1599,26 @@
 "d": "2026-09-27",
 "s": null
 },
+"adzuna.nl/details/5900412199": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.nl/details/5900412231": {
+"d": "2026-09-28",
+"s": null
+},
+"adzuna.nl/details/5900791036": {
+"d": "2026-09-28",
+"s": 3.1
+},
+"adzuna.nl/details/5900798801": {
+"d": "2026-09-28",
+"s": 3.1
+},
+"adzuna.nl/details/5901752996": {
+"d": "2026-09-28",
+"s": null
+},
 "aikidosecurity.recruitee.com/o/legal-counsel": {
 "d": "2026-09-24",
 "s": null
@@ -1399,9 +1627,17 @@
 "d": "2026-09-24",
 "s": null
 },
+"apec.fr/candidat/recherche-emploi.html/emploi/detail-offre/179470636W": {
+"d": "2026-09-28",
+"s": null
+},
 "apply.workable.com/bandit-running/j/FA433B4D7B": {
 "d": "2026-09-26",
 "s": null
+},
+"apply.workable.com/j/BEF301B84C": {
+"d": "2026-09-28",
+"s": 8.0
 },
 "bebee.com/fr/jobs/responsable-adjoint-atelier-de-maroquinerie-allintalent-paris--techmap_fr_4467622074": {
 "d": "2026-09-26",
