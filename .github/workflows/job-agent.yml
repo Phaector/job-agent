@@ -2,7 +2,7 @@ name: Job agent
 
 on:
   schedule:
-    - cron: "0 11 * * *"     # daily search, 7:00 New York summer time (6:00 in winter)
+    - cron: "0 11 */3 * *"   # search every 3 days, 7:00 New York summer time (6:00 in winter)
     - cron: "30 */2 * * *"   # every 2 hours: your added links + cover letters
   workflow_dispatch:
     inputs:
