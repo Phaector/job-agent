@@ -44,7 +44,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 11 * * *" ]; then
+          elif [ "${{ github.event.schedule }}" = "0 11 */3 * *" ]; then
             # Repo variable SKIP_DAILY_UNTIL (YYYY-MM-DD): skip the daily search up to and including that date
             if [[ "$(date -u +%F)" < "${{ vars.SKIP_DAILY_UNTIL }}" || "$(date -u +%F)" = "${{ vars.SKIP_DAILY_UNTIL }}" ]]; then
               echo "Daily search skipped (SKIP_DAILY_UNTIL=${{ vars.SKIP_DAILY_UNTIL }})"
@@ -70,10 +70,10 @@ jobs:
           NOTE: ${{ inputs.note }}
         run: python main.py --mode "${{ steps.mode.outputs.mode }}" --count "${{ inputs.count || '10' }}" --note "$NOTE"
 
-      - name: Remember screened postings
+      - name: Remember screened postings and newsletter emails
         if: steps.mode.outputs.mode == 'daily'
         run: |
           git config user.name "job-agent"
           git config user.email "job-agent@users.noreply.github.com"
-          git add state/seen.json
-          git diff --cached --quiet || (git commit -m "Update screened postings" && git push)
+          git add state/
+          git diff --cached --quiet || (git commit -m "Update agent state" && git push)
