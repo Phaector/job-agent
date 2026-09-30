@@ -597,6 +597,10 @@ def newsletter_job_links():
     Returns a list of (url, source_name) pairs.
     """
     if not (settings.GMAIL_ADDRESS and settings.GMAIL_APP_PASSWORD):
+        missing = [n for n, v in (("GMAIL_ADDRESS", settings.GMAIL_ADDRESS),
+                                  ("GMAIL_APP_PASSWORD", settings.GMAIL_APP_PASSWORD)) if not v]
+        print(f"  [Newsletter] Skipped: {' and '.join(missing)} not set. "
+              "Add them as repository secrets to read your job newsletters and LinkedIn alerts.")
         return []
     cfg = CONFIG["newsletter"]
     senders = cfg.get("sources") or []
@@ -639,7 +643,8 @@ def newsletter_job_links():
                   f"{len(raw_links) - before} raw links")
         box.logout()
     except (imaplib.IMAP4.error, OSError) as e:
-        print(f"  [Newsletter] Could not read Gmail: {e}")
+        print(f"  [Newsletter] Could not read Gmail: {e}. If this says the login failed, "
+              "the app password has been revoked or GMAIL_ADDRESS is wrong.")
         return []
 
     out, seen = [], set()
