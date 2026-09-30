@@ -33,6 +33,7 @@ SESSION.headers.update({
     "Accept-Language": "en-US,en;q=0.9,nl;q=0.8,fr;q=0.7",
 })
 
+IMAP_TIMEOUT = 30          # never let an unreachable mail server hang a run
 ADZUNA_CURRENCY = {"us": "USD", "be": "EUR", "fr": "EUR", "nl": "EUR"}
 
 
@@ -566,6 +567,79 @@ def resolve_link(url: str) -> str:
         return url
 
 
+def _mask(address: str) -> str:
+    name, _, host = (address or "").partition("@")
+    return f"{name[:1]}{'*' * max(len(name) - 1, 0)}@{host}" if host else "(not set)"
+
+
+def mail_probe():
+    """Check the Gmail connection and report, without scoring anything.
+
+    Answers three questions in order: are the credentials there, does the
+    login work, and does each configured sender actually have mail in the
+    lookback window. Costs nothing and writes nothing.
+    """
+    cfg = CONFIG["newsletter"]
+    print("\n--- Gmail check ---")
+    print(f"GMAIL_ADDRESS:      {_mask(settings.GMAIL_ADDRESS)}")
+    pw = settings.GMAIL_APP_PASSWORD
+    print(f"GMAIL_APP_PASSWORD: {f'set, {len(pw)} characters' if pw else 'NOT SET'}")
+    if not (settings.GMAIL_ADDRESS and settings.GMAIL_APP_PASSWORD):
+        print("\nResult: the email source is switched off, because a secret is missing.")
+        print("Add GMAIL_ADDRESS and GMAIL_APP_PASSWORD under Settings -> Secrets and")
+        print("variables -> Actions. An app password is 16 characters, spaces allowed.")
+        return False
+    try:
+        box = imaplib.IMAP4_SSL("imap.gmail.com", timeout=IMAP_TIMEOUT)
+    except OSError as e:
+        print(f"\nResult: could not reach imap.gmail.com: {e}")
+        return False
+    try:
+        box.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
+        print("Login:              OK")
+    except imaplib.IMAP4.error as e:
+        print(f"Login:              FAILED ({e})")
+        print("\nResult: Gmail refused the login. Usually the app password was revoked,")
+        print("or it belongs to a different account than GMAIL_ADDRESS. Make a new one")
+        print("at myaccount.google.com/apppasswords and update the secret.")
+        return False
+    mailbox = '"[Gmail]/All Mail"'
+    if box.select(mailbox, readonly=True)[0] != "OK":
+        print(f'Mailbox:            "[Gmail]/All Mail" not found, falling back to INBOX')
+        print("                    (IMAP may be off: Gmail settings -> Forwarding and POP/IMAP)")
+        mailbox = "INBOX"
+        box.select(mailbox, readonly=True)
+    else:
+        print(f"Mailbox:            {mailbox}")
+    since_day = dt.date.today() - dt.timedelta(days=cfg["lookback_days"])
+    since = f"{since_day.day:02d}-{MONTHS[since_day.month - 1]}-{since_day.year}"
+    print(f"Looking back to:    {since_day} ({cfg['lookback_days']} days)")
+    seen_before = _read_mail_state()
+    total = 0
+    for src in cfg.get("sources") or []:
+        addr, name = src.get("from", ""), src.get("name") or src.get("from", "")
+        status, data = box.search(None, f'(SINCE {since} FROM "{addr}")')
+        nums = (data[0].split() if status == "OK" and data and data[0] else [])
+        total += len(nums)
+        print(f"\n  {name} <{addr}>")
+        print(f"    {len(nums)} emails in the window")
+        for num in nums[-3:]:
+            _, msg_data = box.fetch(num, "(BODY.PEEK[HEADER.FIELDS (SUBJECT DATE MESSAGE-ID)])")
+            if not msg_data or not isinstance(msg_data[0], tuple):
+                continue
+            msg = email.message_from_bytes(msg_data[0][1])
+            key = clean(msg.get("Message-ID") or "")
+            mark = "already read" if key in seen_before else "NEW, would be read"
+            print(f"    - {clean(msg.get('Date'))[:25]} | {clean(msg.get('Subject'))[:60]} | {mark}")
+    box.logout()
+    print(f"\nResult: the connection works. {total} emails matched across "
+          f"{len(cfg.get('sources') or [])} senders.")
+    if not total:
+        print("No matches, so check the sender addresses under newsletter.sources in")
+        print("config.yaml against what the emails actually come from.")
+    return True
+
+
 def _read_mail_state() -> dict:
     try:
         return json.loads(settings.MAIL_STATE_FILE.read_text(encoding="utf-8"))
@@ -613,7 +687,7 @@ def newsletter_job_links():
     since = f"{since_day.day:02d}-{MONTHS[since_day.month - 1]}-{since_day.year}"
     raw_links = []            # (href, source_name)
     try:
-        box = imaplib.IMAP4_SSL("imap.gmail.com")
+        box = imaplib.IMAP4_SSL("imap.gmail.com", timeout=IMAP_TIMEOUT)
         box.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
         if box.select('"[Gmail]/All Mail"', readonly=True)[0] != "OK":
             box.select("INBOX", readonly=True)    # non-English Gmail: All Mail is named differently

@@ -5,6 +5,7 @@ Modes
   light     only your links + cover letters (runs every 2 hours)
   next      move the next N best rows from Queue to Suggested
   patterns  write the monthly patterns report now
+  mailcheck test the Gmail connection and list what it can see, nothing else
   note      add feedback to your Notion profile page (--note "point one | point two")
 
 Add --dry-run to print what would happen without writing to Notion.
@@ -246,13 +247,18 @@ def add_profile_note(db, note: str):
 # ─── Entry point ──────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser(description="Phaedra's job agent")
-    ap.add_argument("--mode", default="daily", choices=["daily", "light", "next", "patterns", "note"])
+    ap.add_argument("--mode", default="daily",
+                    choices=["daily", "light", "next", "patterns", "note", "mailcheck"])
     ap.add_argument("--count", type=int, default=10, help="rows to promote in mode 'next'")
     ap.add_argument("--note", default="", help="feedback for mode 'note'; separate points with |")
     ap.add_argument("--dry-run", action="store_true", help="print instead of writing to Notion")
     args = ap.parse_args()
 
     print(f"\n=== Job agent · {args.mode} · {dt.datetime.now():%Y-%m-%d %H:%M} ===\n")
+
+    if args.mode == "mailcheck":       # before Notion: needs no key and writes nothing
+        raise SystemExit(0 if sources.mail_probe() else 1)
+
     db = NotionDB(dry_run=args.dry_run)
     rows = db.all_rows()
     print(f"[Notion] {len(rows)} rows in your database")

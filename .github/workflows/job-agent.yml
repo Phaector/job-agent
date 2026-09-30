@@ -10,7 +10,7 @@ on:
         description: "What to run"
         type: choice
         default: daily
-        options: [daily, light, next, patterns, note]
+        options: [daily, light, next, patterns, note, mailcheck]
       count:
         description: "Rows to move from Queue to Suggested (mode 'next')"
         default: "10"
