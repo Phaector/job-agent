@@ -154,6 +154,20 @@ class NotionDB:
         for key in ("job_title", "status", "link", "score"):
             if P[key] not in self.schema:
                 print(f"  [Notion] Missing property '{P[key]}' ({key}). Check config.yaml.")
+        status_prop = data["properties"].get(P["status"], {})
+        status_kind = status_prop.get("type")
+        if status_kind not in ("select", "status"):
+            print(f"  [Notion] '{P['status']}' is a {status_kind} field; it must be select or status.")
+        elif status_kind == "status":
+            # Notion creates missing options for a select on the fly, but never
+            # for a status property: a name that is not already there is refused.
+            have = {o["name"] for o in (status_prop.get("status") or {}).get("options", [])}
+            want = [ST["suggested"], ST["queue"], ST["not_interested"]]
+            missing = [w for w in want if w not in have]
+            if missing:
+                print(f"  [Notion] '{P['status']}' has no option named " +
+                      ", ".join(f"'{m}'" for m in missing) +
+                      ". Add it in Notion, or the agent cannot set it.")
         loc_type = self.schema.get(P["location"])
         if loc_type and loc_type not in ("select", "rich_text"):
             print(f"  [Notion] 'Location' is a {loc_type} field; switch it to a select field "
@@ -172,6 +186,8 @@ class NotionDB:
             return "".join(x.get("plain_text", "") for x in prop.get(t, []))
         if t == "url":
             return prop.get("url")
+        if t == "status":
+            return (prop.get("status") or {}).get("name")
         if t == "select":
             return (prop.get("select") or {}).get("name")
         if t == "multi_select":
@@ -239,6 +255,16 @@ class NotionDB:
         if name and self.schema.get(name) in types:
             props[name] = value
 
+    def _choice(self, key, option: str):
+        """Payload for a one-option property, which Notion types as either
+        "select" or "status". Status and Type were written as select only, so
+        on a database where Status is a status property nothing was written
+        and every row came back with no status at all."""
+        kind = self.schema.get(P.get(key, ""))
+        if kind in ("select", "status"):
+            return {kind: {"name": option}}
+        return None
+
     def build_properties(self, job: dict, status=None, only_fill_empty_row=None):
         """Properties for a job. With only_fill_empty_row, fields already
         filled in that row are left alone (used for rows you added)."""
@@ -249,12 +275,12 @@ class NotionDB:
         if not row.get("title"):
             self._set(props, "job_title", ("rich_text",), {"rich_text": [rt(job.get("title", ""))]})
         if status:
-            self._set(props, "status", ("select",), {"select": {"name": status}})
+            self._set(props, "status", ("select", "status"), self._choice("status", status))
         if not row.get("url") and job.get("url"):
             self._set(props, "link", ("url",), {"url": job["url"]})
         if not row.get("type"):
             kind = TYPES["internship"] if job.get("is_internship") else TYPES["job"]
-            self._set(props, "type", ("select",), {"select": {"name": kind}})
+            self._set(props, "type", ("select", "status"), self._choice("type", kind))
         if job.get("loc_option") and not row.get("location"):
             loc_type = self.schema.get(P["location"])
             if loc_type == "select":
@@ -268,7 +294,7 @@ class NotionDB:
         if job.get("total") is not None:
             self._set(props, "score", ("number",), {"number": job["total"]})
         if job.get("track"):
-            self._set(props, "track", ("select",), {"select": {"name": job["track"]}})
+            self._set(props, "track", ("select", "status"), self._choice("track", job["track"]))
         sal = job.get("salary")
         if isinstance(sal, dict) and sal.get("min") and str(sal.get("currency", "")).upper() == "USD":
             try:
@@ -297,7 +323,11 @@ class NotionDB:
         return self._req("PATCH", f"/pages/{page_id}", {"properties": props}) is not None
 
     def set_status(self, page_id, status):
-        return self.update_properties(page_id, {P["status"]: {"select": {"name": status}}})
+        value = self._choice("status", status)
+        if not value:
+            print(f"  [Notion] '{P['status']}' is not a select or status field; cannot set it")
+            return False
+        return self.update_properties(page_id, {P["status"]: value})
 
     def append_blocks(self, page_id, blocks):
         if self.dry_run:

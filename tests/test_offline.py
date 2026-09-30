@@ -302,4 +302,28 @@ finally:
     sources.settings.MAIL_STATE_FILE.unlink(missing_ok=True)
     sources.settings.MAIL_STATE_FILE = _real_state
 
+# ── Notion Status as a "status" property, not a "select" ──
+def fake_db(status_kind):
+    db = notion_db.NotionDB.__new__(notion_db.NotionDB)
+    db.offline, db.dry_run = True, True
+    db.schema = {"Company": "title", "Job Title": "rich_text", "Status": status_kind,
+                 "Reference Link": "url", "Score": "number", "Track": "select",
+                 "Type": "select", "Location": "select", "Date Found": "date"}
+    db.title_prop = "Company"
+    return db
+
+scored_job = job("PR Coordinator")
+scored_job.update({"total": 8.1, "track": "PR / Comms", "loc_option": "New York"})
+for kind in ("status", "select"):
+    props = fake_db(kind).build_properties(scored_job, status="Suggested")
+    check(props.get("Status") == {kind: {"name": "Suggested"}},
+          f"Status written as a {kind} property ({props.get('Status')})")
+check(notion_db.NotionDB._plain({"type": "status", "status": {"name": "Queue"}}) == "Queue",
+      "a status property is read back")
+check(notion_db.NotionDB._plain({"type": "select", "select": {"name": "Queue"}}) == "Queue",
+      "a select property is still read back")
+check(fake_db("rich_text").build_properties(scored_job, status="Suggested").get("Status") is None,
+      "a Status of the wrong type is left alone")
+
+
 print(f"All {passed} offline checks passed.")
