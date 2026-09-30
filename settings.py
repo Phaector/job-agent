@@ -34,4 +34,5 @@ MODEL_SCREEN = CONFIG["models"]["screen"]
 MODEL_DEEP = CONFIG["models"]["deep"]
 
 STATE_FILE = ROOT / "state" / "seen.json"
+MAIL_STATE_FILE = ROOT / "state" / "seen_emails.json"        # newsletter emails already read
 PROFILE_FILE = ROOT / "profile.md"

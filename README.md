@@ -5,8 +5,8 @@ Finds jobs every morning, scores them against your profile with Claude, and puts
 ## What it does
 
 **Every morning (7:00 New York summer time):**
-- Reads company job boards directly (Greenhouse, Lever, Ashby, Workable, Recruitee), searches Adzuna (New York, Belgium, Paris, Amsterdam), optionally Google Jobs, and reads job links from your newsletter emails.
-- Removes what doesn't fit for free: wrong location, senior titles, store roles, internships in Europe, 3+ years required, old postings, duplicates.
+- Reads company job boards directly (Greenhouse, Lever, Ashby, Workable, Recruitee, Teamtailor), searches Adzuna (New York, Belgium, Paris, Amsterdam), optionally Google Jobs, and reads job links from your newsletter and LinkedIn alert emails.
+- Removes what doesn't fit for free: wrong location, senior titles, retail and store roles, internships in Europe, 3+ years required, old postings, duplicates.
 - A cheap Claude model screens the rest. A stronger one scores the survivors on the full posting.
 - The top 10, plus up to 3 wildcards, become **Suggested**. Other good matches wait in **Queue**.
 
@@ -34,11 +34,12 @@ Finds jobs every morning, scores them against your profile with Claude, and puts
 1. **Anthropic:** console.anthropic.com → API Keys → create a key. Add credit and set a monthly spend limit under Billing.
 2. **Adzuna:** developer.adzuna.com → register → copy the App ID and App Key.
 3. **Optional, SerpApi (Google Jobs):** serpapi.com → free plan → copy the API key. The agent uses 3 searches a day.
-4. **Optional, newsletter emails:**
-   1. In Gmail, create a filter for the All Things Fashion Tech sender that applies the label `Job newsletters`.
-   2. Turn on 2-Step Verification on your Google account.
-   3. Create an app password at myaccount.google.com/apppasswords.
-   4. Note: this password can read your mail. It only lives in your private repo's secrets.
+4. **Optional, newsletter and alert emails:**
+   1. Turn on 2-Step Verification on your Google account.
+   2. Create an app password at myaccount.google.com/apppasswords.
+   3. Note: this password can read your mail. It only lives in your private repo's secrets.
+   4. No Gmail label or filter needed. The agent searches your mail by sender, listed under `newsletter.sources` in `config.yaml` (All Things Fashion Tech's job board and LinkedIn job alerts). To add another newsletter, open one of its emails and copy the address it came from into that list.
+   5. Each email is read once and remembered in `state/seen_emails.json`, so a job board that only arrives every few weeks is still caught.
 
 ### 3. GitHub
 
@@ -111,12 +112,14 @@ python main.py --dry-run        # full run that prints instead of writing to Not
 | Excluded titles, seniority words | `filters` |
 | Search terms per country | `search` |
 | Company boards to watch | `watchlist` |
+| Newsletters and alert emails to read | `newsletter.sources` |
 
 Your directions and background live in the Notion profile page (or `profile.md`).
 
 ## Limits to know
 - Some career sites only show their jobs after running JavaScript. The agent can't read those. It adds a note to the row, so you can paste the description into the page instead.
-- LinkedIn, Indeed and Glassdoor are not scraped; Adzuna and Google Jobs cover much of the same market.
+- LinkedIn, Indeed and Glassdoor are not scraped; Adzuna and Google Jobs cover much of the same market, and LinkedIn's own alert emails are read for their links.
+- Fashion PR agencies mostly run their careers pages by hand rather than on a job board the agent can read. The Independents feed covers Karla Otto, Lucien Pagès, CTZAR, K2, Lefty and WE ARE ONA; for BPCM, Purple, KCD, The Lede Company and Factory PR, set up LinkedIn job alerts and let the email channel catch them.
 - Applicant counts are almost never available through these sources, so freshness relies on posting dates.
 - SpreeAI (Rippling) and Alvanon don't use a supported job board, so they can't be watched automatically yet.
 - Each morning run uses Claude for up to 40 full scores, so keep a spend limit set in the Anthropic console. GitHub's free plan includes 2,000 Actions minutes a month for private repos; this agent should need well under that.

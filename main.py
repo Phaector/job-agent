@@ -106,9 +106,8 @@ def collect(rows):
         for q in todays:
             jobs += sources.search_serpapi(q["q"], q["location"], q.get("gl", "us"))
 
-    links = sources.newsletter_job_links()
-    for url in links:
-        job = sources.fetch_posting(url, source=CONFIG["newsletter"]["source_name"])
+    for url, source_name in sources.newsletter_job_links():
+        job = sources.fetch_posting(url, source=source_name)
         if job:
             jobs.append(job)
         time.sleep(0.5)

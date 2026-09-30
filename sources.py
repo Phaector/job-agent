@@ -11,12 +11,14 @@ Every source returns the same job dict, built by make_job().
 """
 import datetime as dt
 import email
+import email.utils
 import html
 import imaplib
 import json
 import re
 import time
 import urllib.parse
+import xml.etree.ElementTree as ET
 
 import requests
 from bs4 import BeautifulSoup
@@ -57,8 +59,10 @@ def to_date(value):
         text = str(value).strip()
         if re.match(r"^\d{4}-\d{2}-\d{2}", text):
             return text[:10]
+        if "," in text and re.search(r"\d{4}", text):     # RFC 822, as RSS feeds use
+            return email.utils.parsedate_to_datetime(text).date().isoformat()
         return dt.datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
-    except (ValueError, OverflowError, OSError):
+    except (ValueError, TypeError, OverflowError, OSError):
         return None
 
 
@@ -159,6 +163,12 @@ def detect_ats(url: str):
     if host.endswith(".recruitee.com"):
         jid = parts[1] if len(parts) >= 2 and parts[0] == "o" else None
         return {"ats": "recruitee", "slug": host.split(".")[0], "job_id": jid, "eu": False}
+    # Teamtailor: <name>.teamtailor.com, or a careers host whose job paths look
+    # like /jobs/8462906-consolidation-assistant (its distinctive id-slug form).
+    tt_path = len(parts) >= 2 and parts[0] == "jobs" and re.match(r"^\d{5,}-", parts[1])
+    if host.endswith(".teamtailor.com") or (host.startswith("careers.") and tt_path):
+        return {"ats": "teamtailor", "slug": host.removeprefix("www."),
+                "job_id": parts[1] if tt_path else None, "eu": False}
     return None
 
 
@@ -258,9 +268,80 @@ def board_recruitee(slug, company=None, eu=False):
     return jobs
 
 
+TT_NS = {"tt": "https://teamtailor.com/locations"}
+
+
+def _tt_values(node, prefer=("city", "name")):
+    """Text under a Teamtailor element, preferring the tags that name a place.
+
+    A filled locations element looks like
+      <tt:locations><tt:location><tt:name>New York - Park Ave S</tt:name>
+      <tt:address/><tt:zip/><tt:city>New York</tt:city><tt:country/></tt:location>
+    and is written empty on some postings, so this reads whatever is there:
+    the city (or name) tags when present, otherwise all text and attributes.
+    """
+    if node is None:
+        return []
+    for tag in prefer:
+        hits = [clean(el.text) for el in node.iter()
+                if el.tag.rsplit("}", 1)[-1] == tag and clean(el.text)]
+        if hits:
+            return list(dict.fromkeys(hits))
+    out = []
+    for el in node.iter():
+        out += [el.text] + list(el.attrib.values())
+    return list(dict.fromkeys(clean(v) for v in out if clean(v)))
+
+
+def _one_known_city(text: str):
+    """A city from the config, but only when the text names exactly one.
+
+    Used when a posting carries no location of its own: a description that
+    mentions several offices is left alone rather than guessed at.
+    """
+    import filters
+    hits = {name for name, _tier, rx in filters.LOCATION_RX if rx.search(text or "")}
+    return hits.pop() if len(hits) == 1 else ""
+
+
+def board_teamtailor(slug, company=None, eu=False):
+    """Teamtailor's public RSS feed. Used by fashion PR and creative agencies.
+
+    The slug is either a careers host ("careers.karlaotto.com") or a
+    Teamtailor subdomain name ("karlaotto" -> karlaotto.teamtailor.com).
+    """
+    host = slug if "." in slug else f"{slug}.teamtailor.com"
+    r = http_get(f"https://{host}/jobs.rss")
+    if not r:
+        return []
+    try:
+        root = ET.fromstring(r.content)
+    except ET.ParseError as e:
+        print(f"    [teamtailor:{slug}] feed is not XML: {e}")
+        return []
+    channel_name = clean((root.findtext("./channel/title") or ""))
+    jobs = []
+    for item in root.iterfind("./channel/item"):
+        desc = html_to_text(item.findtext("description") or "")
+        location = ", ".join(_tt_values(item.find("tt:locations", TT_NS)))
+        if not location:
+            location = _one_known_city(f"{item.findtext('title') or ''} {desc[:1200]}")
+        if not location and (item.findtext("remoteStatus") or "").lower() in ("fully", "remote"):
+            location = "Remote"
+        # tt:division names the agency inside a group feed (Karla Otto, K2, ...)
+        division = ", ".join(_tt_values(item.find("tt:division", TT_NS), prefer=()))
+        jobs.append(make_job(
+            url=item.findtext("link") or "", title=item.findtext("title") or "",
+            company=division or company or channel_name or pretty_slug(slug),
+            location=location, description=desc,
+            posted_at=item.findtext("pubDate"), source="Company board (Teamtailor)"))
+    return jobs
+
+
 BOARD_READERS = {
     "greenhouse": board_greenhouse, "lever": board_lever, "ashby": board_ashby,
     "workable": board_workable, "recruitee": board_recruitee,
+    "teamtailor": board_teamtailor,
 }
 
 
@@ -437,7 +518,8 @@ def fetch_posting(url, source="Added by you"):
 JOB_HOST_HINTS = ("greenhouse.io", "lever.co", "ashbyhq.com", "workable.com", "recruitee.com",
                   "smartrecruiters.com", "myworkdayjobs.com", "rippling.com", "bamboohr.com",
                   "teamtailor.com", "jobvite.com", "icims.com", "successfactors", "welcometothejungle.com",
-                  "linkedin.com/jobs", "glassdoor", "indeed.", "wellfound.com", "builtinnyc.com")
+                  "linkedin.com/jobs", "linkedin.com/comm/jobs", "glassdoor", "indeed.",
+                  "wellfound.com", "builtinnyc.com")
 SKIP_HINTS = ("unsubscribe", "substack.com/app", "substack.com/profile", "/subscribe", "substack.com/@",
               "substackcdn", "twitter.com", "x.com/", "instagram.com", "facebook.com", "tiktok.com",
               "mailto:", "apps.apple.com", "play.google.com", "/account", "/settings")
@@ -462,6 +544,18 @@ def _html_part(msg):
     return ""
 
 
+def tidy_link(url: str) -> str:
+    """Strip tracking from links that arrive in alert emails.
+
+    LinkedIn alerts link to /comm/jobs/view/<id>/?trackingId=... ; the plain
+    /jobs/view/<id>/ form is the same posting and dedupes across alerts.
+    """
+    m = re.search(r"linkedin\.com/(?:comm/)?jobs/view/(\d+)", url)
+    if m:
+        return f"https://www.linkedin.com/jobs/view/{m.group(1)}/"
+    return url
+
+
 def resolve_link(url: str) -> str:
     try:
         r = SESSION.get(url, allow_redirects=True, timeout=15, stream=True)
@@ -472,45 +566,95 @@ def resolve_link(url: str) -> str:
         return url
 
 
+def _read_mail_state() -> dict:
+    try:
+        return json.loads(settings.MAIL_STATE_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def _write_mail_state(state: dict, keep_days: int = 120):
+    cutoff = (dt.date.today() - dt.timedelta(days=keep_days)).isoformat()
+    state = {k: v for k, v in state.items() if v >= cutoff}
+    settings.MAIL_STATE_FILE.parent.mkdir(exist_ok=True)
+    settings.MAIL_STATE_FILE.write_text(json.dumps(state, indent=0, sort_keys=True),
+                                       encoding="utf-8")
+
+
 def newsletter_job_links():
-    """Job links from recent emails carrying the configured Gmail label."""
+    """Job links from recent emails, found by sender address.
+
+    Searches "[Gmail]/All Mail" for each configured sender, so it works whether
+    the mail sits in the inbox, is archived, or carries a label. No Gmail label
+    or filter needed: the earlier version selected a mailbox named after a label
+    that was never created, so this source silently yielded nothing.
+
+    Each email is parsed once only: its Message-ID is remembered in
+    state/seen_emails.json, which keeps the lookback window generous (a job
+    board that arrives every few weeks is still caught) without re-resolving
+    hundreds of tracking links every morning.
+
+    Returns a list of (url, source_name) pairs.
+    """
     if not (settings.GMAIL_ADDRESS and settings.GMAIL_APP_PASSWORD):
         return []
     cfg = CONFIG["newsletter"]
+    senders = cfg.get("sources") or []
+    if not senders:
+        print("  [Newsletter] No senders configured, skipping")
+        return []
+    mail_state = _read_mail_state()
+    today = dt.date.today().isoformat()
     since_day = dt.date.today() - dt.timedelta(days=cfg["lookback_days"])
     since = f"{since_day.day:02d}-{MONTHS[since_day.month - 1]}-{since_day.year}"
-    raw_links = []
+    raw_links = []            # (href, source_name)
     try:
         box = imaplib.IMAP4_SSL("imap.gmail.com")
         box.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
-        status, _ = box.select(f'"{cfg["gmail_label"]}"', readonly=True)
-        if status != "OK":
-            print(f"  [Newsletter] Gmail label '{cfg['gmail_label']}' not found.")
-            box.logout()
-            return []
-        _, data = box.search(None, "SINCE", since)
-        for num in (data[0].split() if data and data[0] else [])[-10:]:
-            _, msg_data = box.fetch(num, "(RFC822)")
-            if not msg_data or not isinstance(msg_data[0], tuple):
+        if box.select('"[Gmail]/All Mail"', readonly=True)[0] != "OK":
+            box.select("INBOX", readonly=True)    # non-English Gmail: All Mail is named differently
+        for src in senders:
+            addr, name = src.get("from", ""), src.get("name") or src.get("from", "email")
+            if not addr:
                 continue
-            msg = email.message_from_bytes(msg_data[0][1])
-            soup = BeautifulSoup(_html_part(msg), "html.parser")
-            raw_links += [a["href"] for a in soup.find_all("a", href=True)]
+            status, data = box.search(None, f'(SINCE {since} FROM "{addr}")')
+            nums = (data[0].split() if status == "OK" and data and data[0] else [])
+            if not nums:
+                print(f"  [Newsletter] {name}: no mail since {since}")
+                continue
+            new_emails, before = 0, len(raw_links)
+            for num in nums[-int(src.get("max_emails", 6)):]:
+                _, msg_data = box.fetch(num, "(RFC822)")
+                if not msg_data or not isinstance(msg_data[0], tuple):
+                    continue
+                msg = email.message_from_bytes(msg_data[0][1])
+                key = clean(msg.get("Message-ID") or "") or f"{addr}:{num!r}"
+                if key in mail_state:
+                    continue
+                mail_state[key] = today
+                new_emails += 1
+                soup = BeautifulSoup(_html_part(msg), "html.parser")
+                raw_links += [(a["href"], name) for a in soup.find_all("a", href=True)]
+            print(f"  [Newsletter] {name}: {len(nums)} emails in window, {new_emails} new, "
+                  f"{len(raw_links) - before} raw links")
         box.logout()
     except (imaplib.IMAP4.error, OSError) as e:
         print(f"  [Newsletter] Could not read Gmail: {e}")
         return []
 
     out, seen = [], set()
-    for href in raw_links:
+    for href, name in raw_links:
         low = href.lower()
         if not low.startswith("http") or any(s in low for s in SKIP_HINTS):
             continue
-        final = resolve_link(href) if ("substack" in low or "redirect" in low or "click" in low) else href
+        final = resolve_link(href) if ("substack" in low or "redirect" in low
+                                       or "click" in low) else href
+        final = tidy_link(final)
         if looks_like_job(final) and final not in seen:
             seen.add(final)
-            out.append(final)
+            out.append((final, name))
         if len(out) >= cfg["max_links"]:
             break
+    _write_mail_state(mail_state)
     print(f"  [Newsletter] {len(out)} job links found")
     return out

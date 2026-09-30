@@ -26,7 +26,8 @@ notion:
     salary: Salary              # number field in dollars: only filled for USD postings
     next_action: Next Action
     why_not: Why not            # optional text field: a few words when you mark "Not interested"
-    track: Track                # optional select field: Fashion business / Tech business / Fashion-tech / Wildcard
+    track: Track                # optional select field: PR / Comms, Fashion business, Tech business, Fashion-tech, Wildcard
+                                # (new options are created in Notion automatically the first time one is used)
   statuses:
     suggested: Suggested
     queue: Queue
@@ -90,16 +91,41 @@ locations:
 # ---------------------------------------------------------------------
 filters:
   max_years_required: 2          # postings that clearly ask for 3+ years are dropped
+  # "Not retail" is about the work, not the employer: these are store-floor
+  # and store-running titles. Corporate roles at retailers, marketplaces and
+  # resale companies stay in (she said yes to Wolf & Badger, Fashionphile,
+  # Vivrelle, StockX), so do not add company names here.
   exclude_title_patterns:
     - sales associate
+    - sales assistant
     - store manager
+    - store supervisor
+    - store lead
+    - store associate
+    - shop assistant
     - retail associate
+    - retail assistant
+    - retail sales
+    - retail manager
+    - retail supervisor
+    - retail operations
+    - store operations
     - stock associate
+    - stockroom
     - cashier
     - keyholder
+    - key holder
     - client advisor
+    - sales advisor
     - brand ambassador
     - boutique
+    - visual merchandiser
+    - visual merchandising
+    - personal shopper
+    - stylists?
+    - winkelmedewerker
+    - winkelbediende
+    - winkelverantwoordelijke
     - part[- ]time
     - seasonal
     - freelance
@@ -153,6 +179,14 @@ search:
           - wholesale coordinator
           - fashion tech
           - graduate program
+          # PR and communications, fashion first
+          - public relations coordinator fashion
+          - pr assistant fashion
+          - account coordinator public relations
+          - communications coordinator fashion
+          - press assistant fashion
+          - influencer marketing coordinator
+          - brand communications assistant
       be:
         where: ""
         terms:
@@ -168,6 +202,10 @@ search:
           - graduate programme
           - traineeship
           - junior consultant
+          - junior pr
+          - communicatie medewerker mode
+          - persverantwoordelijke
+          - public relations junior
       fr:
         where: Paris
         terms:
@@ -194,6 +232,10 @@ search:
       - {q: "graduate programme luxury fashion", location: "Belgium", gl: be}
       - {q: "implementation consultant junior", location: "Belgium", gl: be}
       - {q: "coordinateur développement produit maroquinerie", location: "Paris, Ile-de-France, France", gl: fr}
+      - {q: "fashion pr agency account coordinator", location: "New York, New York, United States", gl: us}
+      - {q: "public relations assistant fashion brand", location: "New York, New York, United States", gl: us}
+      - {q: "communications coordinator luxury brand", location: "New York, New York, United States", gl: us}
+      - {q: "junior public relations fashion", location: "Belgium", gl: be}
 
 # ---------------------------------------------------------------------
 # WATCHLIST: company job boards read straight from their public feeds.
@@ -207,16 +249,36 @@ watchlist:
   ashby: {}
   workable: {lyst: Lyst}
   recruitee: {}
+  # Teamtailor boards. The key is the careers host (or a bare name for
+  # <name>.teamtailor.com). Fashion PR and creative agencies mostly sit here
+  # rather than on Greenhouse or Lever.
+  # The Independents is the group behind Karla Otto, K2, Bureau Betak, CTZAR,
+  # Lefty and others: one feed, many agencies, and tt:division names which.
+  teamtailor:
+    careers.the-independents.com: The Independents
+    careers.karlaotto.com: Karla Otto
 
 # ---------------------------------------------------------------------
-# NEWSLETTER: job links from emails with this Gmail label
-# (only runs if GMAIL_ADDRESS and GMAIL_APP_PASSWORD are set).
+# NEWSLETTER / ALERT EMAILS: job links read straight from your mail,
+# matched by sender address (only runs if GMAIL_ADDRESS and
+# GMAIL_APP_PASSWORD are set). No Gmail label or filter needed: the
+# earlier version looked for a label called "Job newsletters" that was
+# never created, so this whole source quietly returned nothing.
+# Each email is parsed once only (state/seen_emails.json), so the
+# lookback can stay wide enough to catch a job board that arrives
+# every few weeks. To add a sender: open one of its emails and copy
+# the address it came from.
 # ---------------------------------------------------------------------
 newsletter:
-  gmail_label: Job newsletters
-  lookback_days: 8
+  lookback_days: 35
   max_links: 60
-  source_name: All Things Fashion Tech
+  sources:
+    - name: All Things Fashion Tech
+      from: allthingsfashiontech+job-board@substack.com
+      max_emails: 4          # job board arrives roughly monthly
+    - name: LinkedIn job alerts
+      from: jobalerts-noreply@linkedin.com
+      max_emails: 25         # one email per alert, several a day
 
 # ---------------------------------------------------------------------
 # TASTE SEEDS: your first examples, used until Notion has enough

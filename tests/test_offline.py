@@ -171,4 +171,135 @@ for expected in [("workable", "wolfandbadger"), ("lever", "wgsn"), ("greenhouse"
                  ("ashby", "phia"), ("workable", "lyst"), ("greenhouse", "boldmetrics")]:
     check(expected in keys, f"watchlist has {expected}")
 
+# ── Teamtailor board (fashion PR agencies) ──
+TT_FEED = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:tt="https://teamtailor.com/locations">
+  <channel>
+    <title>The Independents</title>
+    <link>https://careers.the-independents.com/jobs</link>
+    <item>
+      <title>Account Coordinator, Fashion Communications</title>
+      <description>&lt;p&gt;Join our New York press office team.&lt;/p&gt;</description>
+      <pubDate>Mon, 28 Sep 2026 10:29:20 +0200</pubDate>
+      <link>https://careers.the-independents.com/jobs/8462906-account-coordinator</link>
+      <remoteStatus>none</remoteStatus>
+      <tt:locations><tt:location><tt:name>New York - Park Ave S</tt:name><tt:address>Park Ave S</tt:address><tt:zip>10016</tt:zip><tt:city>New York</tt:city><tt:country>United States</tt:country></tt:location></tt:locations>
+      <tt:division>Karla Otto</tt:division>
+    </item>
+    <item>
+      <title>Consolidation Assistant</title>
+      <description>&lt;p&gt;Support our Group Finance Paris team.&lt;/p&gt;</description>
+      <pubDate>Mon, 28 Sep 2026 10:29:20 +0200</pubDate>
+      <link>https://careers.the-independents.com/jobs/8462907-consolidation-assistant</link>
+      <tt:locations></tt:locations>
+      <tt:division/>
+    </item>
+    <item>
+      <title>Producer, Global</title>
+      <description>&lt;p&gt;Working across our New York, Paris and Amsterdam offices.&lt;/p&gt;</description>
+      <link>https://careers.the-independents.com/jobs/8462908-producer</link>
+      <tt:locations/>
+    </item>
+  </channel>
+</rss>"""
+
+
+class FakeResponse:
+    content = TT_FEED
+
+
+_real_http_get = sources.http_get
+sources.http_get = lambda *a, **k: FakeResponse()
+try:
+    tt = sources.board_teamtailor("careers.the-independents.com", "The Independents")
+finally:
+    sources.http_get = _real_http_get
+
+check(len(tt) == 3, f"three Teamtailor items parsed ({len(tt)})")
+check(tt[0]["location"] == "New York", f"location read from tt:locations ({tt[0]['location']!r})")
+check(tt[0]["company"] == "Karla Otto", "tt:division names the agency in a group feed")
+check(tt[0]["posted_at"] == "2026-09-28", f"RFC 822 pubDate parsed ({tt[0]['posted_at']})")
+check(tt[0]["description"].startswith("Join our New York"), "description unescaped to text")
+check(tt[1]["location"] == "Paris", "single city in the text is used when no location field")
+check(tt[1]["company"] == "The Independents", "falls back to the feed's own name")
+check(tt[2]["location"] == "", "several cities in the text are not guessed at")
+check(sources.detect_ats("https://careers.the-independents.com/jobs/8462906-account-coordinator")
+      == {"ats": "teamtailor", "slug": "careers.the-independents.com",
+          "job_id": "8462906-account-coordinator", "eu": False}, "Teamtailor link detected")
+check(sources.detect_ats("https://careers.somebrand.com/jobs/marketing-lead") is None,
+      "a non-Teamtailor careers link is not mistaken for one")
+check(sources.detect_ats("https://karlaotto.teamtailor.com/jobs")["slug"] == "karlaotto.teamtailor.com",
+      "teamtailor.com subdomain detected")
+check(main.watchlist_boards([])[("teamtailor", "careers.karlaotto.com", False)] == "Karla Otto",
+      "Teamtailor boards come through from config")
+
+
+# ── Newsletter / alert emails: read by sender, each email parsed once ──
+class FakeIMAP:
+    """Minimal stand-in for imaplib.IMAP4_SSL holding two fake emails."""
+    MAIL = {
+        "allthingsfashiontech+job-board@substack.com": (
+            "<jobboard-1@substack.com>",
+            '<a href="https://job-boards.greenhouse.io/moncler/jobs/123">Assistant Merchandiser</a>'
+            '<a href="https://jobs.lever.co/depop/abc-def">Partnerships Coordinator</a>'
+            '<a href="https://allthingsfashiontech.substack.com/subscribe">Subscribe</a>'
+            '<a href="https://twitter.com/atft">Follow us</a>'),
+        "jobalerts-noreply@linkedin.com": (
+            "<alert-1@linkedin.com>",
+            '<a href="https://www.linkedin.com/comm/jobs/view/4123456789/?trackingId=xY%3D">PR Coordinator</a>'
+            '<a href="https://www.linkedin.com/comm/jobs/view/4123456789/?trackingId=other">same job again</a>'
+            '<a href="https://www.linkedin.com/psettings/email">Unsubscribe settings</a>'),
+    }
+
+    def __init__(self, *a, **k):
+        self.current = None
+
+    def login(self, *a):
+        return "OK", []
+
+    def select(self, mailbox, readonly=False):
+        return ("OK", []) if "All Mail" in mailbox else ("NO", [])
+
+    def search(self, charset, criteria):
+        self.current = next((a for a in self.MAIL if f'FROM "{a}"' in criteria), None)
+        return ("OK", [b"1"]) if self.current else ("OK", [b""])
+
+    def fetch(self, num, spec):
+        msgid, body = self.MAIL[self.current]
+        raw = (f"Message-ID: {msgid}\r\nSubject: Jobs\r\n"
+               f"Content-Type: text/html; charset=utf-8\r\n\r\n{body}").encode()
+        return "OK", [(b"1 (RFC822 {})", raw)]
+
+    def logout(self):
+        return "OK", []
+
+
+check(sources.tidy_link("https://www.linkedin.com/comm/jobs/view/4123456789/?trackingId=xY%3D")
+      == "https://www.linkedin.com/jobs/view/4123456789/", "LinkedIn tracking link tidied")
+check(sources.tidy_link("https://job-boards.greenhouse.io/moncler/jobs/123")
+      == "https://job-boards.greenhouse.io/moncler/jobs/123", "other links left alone")
+
+_real_imap = sources.imaplib.IMAP4_SSL
+_real_state = sources.settings.MAIL_STATE_FILE
+sources.imaplib.IMAP4_SSL = FakeIMAP
+sources.settings.GMAIL_ADDRESS = "her@gmail.com"
+sources.settings.GMAIL_APP_PASSWORD = "app-password"
+sources.settings.MAIL_STATE_FILE = Path("/tmp/job-agent-test-seen-emails.json")
+sources.settings.MAIL_STATE_FILE.unlink(missing_ok=True)
+try:
+    first = sources.newsletter_job_links()
+    urls = [u for u, _ in first]
+    names = {n for _, n in first}
+    check(len(first) == 3, f"3 job links from 2 emails, dupes and social dropped ({len(first)})")
+    check("https://www.linkedin.com/jobs/view/4123456789/" in urls, "LinkedIn job kept once")
+    check("https://job-boards.greenhouse.io/moncler/jobs/123" in urls, "newsletter job kept")
+    check(not any("subscribe" in u or "twitter" in u or "psettings" in u for u in urls),
+          "subscribe, social and settings links dropped")
+    check(names == {"All Things Fashion Tech", "LinkedIn job alerts"}, "source name per link")
+    check(sources.newsletter_job_links() == [], "same emails are not read twice")
+finally:
+    sources.imaplib.IMAP4_SSL = _real_imap
+    sources.settings.MAIL_STATE_FILE.unlink(missing_ok=True)
+    sources.settings.MAIL_STATE_FILE = _real_state
+
 print(f"All {passed} offline checks passed.")

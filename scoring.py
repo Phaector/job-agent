@@ -93,7 +93,7 @@ CANDIDATE PROFILE:
 HER TASTE SO FAR:
 {taste}
 
-Keep a job if a graduate with this profile could realistically do it at entry level AND it fits her directions, resembles roles she said yes to, or would be a smart wildcard for a business engineering plus management graduate. Reject clear misfits: roles needing a specialist degree she lacks (engineering, law, medicine, design portfolio), senior roles, store-floor sales, and fields with no link to her skills or interests. Judge the substance of the role, never keyword overlap. When unsure, keep.
+Keep a job if a graduate with this profile could realistically do it at entry level AND it fits her directions, resembles roles she said yes to, or would be a smart wildcard for a business engineering plus management graduate. Reject clear misfits: roles needing a specialist degree she lacks (engineering, law, medicine, design portfolio), senior roles, retail work (shop floor, store management, store operations), and fields with no link to her skills or interests. A corporate role at a company that happens to sell things is not retail work: keep it. Judge the substance of the role, never keyword overlap. When unsure, keep.
 
 Return ONLY a JSON array: [{{"i": <number>, "keep": true or false, "reason": "<max 12 words>"}}]"""
 
@@ -136,11 +136,11 @@ HOW TO SCORE
 1. List up to 6 things the role really needs, including unstated ones. A showroom associate needs client handling and logistics coordination even if the posting only says "support the showroom". For each need, find concrete evidence in her profile (a job, project, course or skill) or say there is none.
 2. Give sub-scores from 1 to 10:
    - skills_fit: how well those needs are evidenced in her profile.
-   - direction_fit: 10 = business role at a fashion-tech company, or fashion business/operations close to product, ateliers or suppliers. 8 = business role at a tech/AI company or at a fashion or luxury company. 5 = solid business role elsewhere that builds relevant skills. 2 = unrelated.
+   - direction_fit: 10 = PR, communications or brand role at a fashion/luxury PR or brand agency or in-house at a fashion or luxury brand; business role at a fashion-tech company; fashion business/operations close to product, ateliers or suppliers. 8 = business role at a tech/AI company or at a fashion or luxury company; PR or communications role at a non-fashion agency or brand. 5 = solid business role elsewhere that builds relevant skills. 2 = unrelated. Score 1 and flag a red flag for shop-floor, store-management or store-operations work, whatever the company: she does not want retail roles, though corporate roles at retailers, marketplaces and resale companies are wanted.
    - growth_onboarding: 10 = graduate or trainee programme, or explicit structured training and mentoring, or a large group with internal mobility. 5 = no information. 2 = "hit the ground running", solo role, no team.
    - taste_match: similarity to roles she said yes to versus no to.
    - feasibility: 10 = realistic entry-level hire today. Subtract for required years she lacks, hard credentials, or daily client work in French at native level (her French is fluent but rusty: small penalty only). Learnable tools such as CLO 3D, PLM systems or a specific CRM: small penalty only.
-3. Track: "Fashion business", "Tech business", "Fashion-tech" (a company combining both), or "Wildcard" (outside her directions but a smart fit for her transferable skills).
+3. Track: "PR / Comms" (PR, communications, press, influencer or brand-events work, agency or in-house), "Fashion business", "Tech business", "Fashion-tech" (a company combining both), or "Wildcard" (outside her directions but a smart fit for her transferable skills).
 4. Flag internships and whether they require current student enrollment. Extract a deadline, salary and street address only if the posting states them.
 
 Write reasons as specific evidence ("ran onboarding deliverables at TechWolf"), never generic praise. Be honest: a weak fit gets low scores.
@@ -149,7 +149,7 @@ Return ONLY this JSON:
 {{
   "needs": [{{"need": "...", "evidence": "... or none", "met": "yes|partly|no"}}],
   "subscores": {{"skills_fit": 0, "direction_fit": 0, "growth_onboarding": 0, "taste_match": 0, "feasibility": 0}},
-  "track": "Fashion business|Tech business|Fashion-tech|Wildcard",
+  "track": "PR / Comms|Fashion business|Tech business|Fashion-tech|Wildcard",
   "one_line": "<what the job is, max 20 words>",
   "why_it_fits": ["...", "...", "..."],
   "gaps": [{{"gap": "...", "learnable": true, "how": "..."}}],
