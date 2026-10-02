@@ -12,6 +12,7 @@ Finds jobs every morning, scores them against your profile with Claude, and puts
 
 **Every 2 hours:**
 - Rows you added with only a link get filled in and scored.
+- Rows with no link get the same treatment when you paste the posting into the row's page under a **Job Description** heading (handy for Handshake and LinkedIn, which need a login).
 - Rows where you ticked **Cover Letter** under Next Action get a draft in the page.
 
 **On the 1st of each month:** a patterns report appears under your profile page.
@@ -117,7 +118,7 @@ python main.py --dry-run        # full run that prints instead of writing to Not
 Your directions and background live in the Notion profile page (or `profile.md`).
 
 ## Limits to know
-- Some career sites only show their jobs after running JavaScript. The agent can't read those. It adds a note to the row, so you can paste the description into the page instead.
+- Some career sites only show their jobs after running JavaScript. The agent can't read those. It adds a note to the row; paste the description into the page and the next run fills the row in from that.
 - LinkedIn, Indeed and Glassdoor are not scraped; Adzuna and Google Jobs cover much of the same market, and LinkedIn's own alert emails are read for their links.
 - Fashion PR agencies mostly run their careers pages by hand rather than on a job board the agent can read. The Independents feed covers Karla Otto, Lucien Pagès, CTZAR, K2, Lefty and WE ARE ONA; for BPCM, Purple, KCD, The Lede Company and Factory PR, set up LinkedIn job alerts and let the email channel catch them.
 - Applicant counts are almost never available through these sources, so freshness relies on posting dates.

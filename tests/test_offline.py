@@ -406,4 +406,62 @@ check("v2" in writer._letter_filename("Karla Otto", "Account Coordinator", 2),
 check("/" not in writer._letter_filename("A/B Co", "Role", 1), "slashes never reach the filename")
 
 
+# ── Rows filled in from a job description pasted into the page ──
+_posting = ("Allocator\nHybrid or onsite, based in New York City, NY\n" +
+            "Analyze sales, inventory and store performance to support allocation decisions. " * 8)
+_pages = {
+    "pasted": "# Job Description\n" + _posting + "\n## ✍️ Cover letter draft 1 · 02 Oct 2026\nMy letter text.",
+    "notes": "# Notes Call\n" + "- they run face to face campaigns for NGOs and I liked the team\n" * 12,
+    "failed": "W182698\nWorkforce Strategy Manager, Nutley\n" + _posting +
+              f"\n{writer.FAIL_MARKER} automatically (the site may need a login or JavaScript).",
+    "empty": "",
+}
+check("My letter text" not in writer.pasted_posting(_pages["pasted"], needs_heading=True),
+      "the agent's own letter draft is not read as the posting")
+check(writer.pasted_posting(_pages["notes"], needs_heading=True) == "",
+      "interview notes on a row with no link are not a posting")
+check(writer.pasted_posting("# Job Description\nshort", needs_heading=True) == "",
+      "a few words are not a posting")
+
+
+def _manual_row(key, url="", title=""):
+    return {"id": key, "created": dt.datetime.now(dt.timezone.utc).isoformat(), "company": "Acme",
+            "title": title, "url": url, "status": "To Apply", "score": None}
+
+
+_db = fake_db("status")
+_db.schema["Deadline"] = "date"
+_written, _appended = {}, {}
+_db.page_text = lambda page_id: _pages[page_id]
+_db.update_properties = lambda page_id, props: _written.update({page_id: props}) or True
+_db.append_blocks = lambda page_id, blocks: _appended.setdefault(page_id, []).extend(blocks) or True
+_real_fetch, _real_score = sources.fetch_posting, scoring.deep_score
+sources.fetch_posting = lambda url, source="": None
+scoring.deep_score = lambda j, profile, taste: {
+    "subscores": {"skills_fit": 7, "direction_fit": 9, "growth_onboarding": 8, "taste_match": 8,
+                  "feasibility": 9},
+    "track": "Fashion business", "title": "Allocator", "location": "New York City, NY",
+    "deadline": "2026-10-01"}
+try:
+    _n = writer.enrich_manual_rows(_db, [
+        _manual_row("pasted"), _manual_row("notes"),
+        _manual_row("failed", url="https://careers.example.com/job/1", title="Workforce Strategy Manager"),
+        _manual_row("empty", url="https://careers.example.com/job/2")], "profile", "taste")
+finally:
+    sources.fetch_posting, scoring.deep_score = _real_fetch, _real_score
+check(_n == 2, f"two rows filled in from pasted text ({_n})")
+check(_written["pasted"].get("Score", {}).get("number") is not None, "a row with no link gets a score")
+check(_written["pasted"]["Track"] == {"select": {"name": "Fashion business"}}, "and a track")
+check(_written["pasted"]["Location"] == {"select": {"name": "New York"}}, "and a location from the posting")
+check(_written["pasted"]["Job Title"]["rich_text"][0]["text"]["content"] == "Allocator",
+      "and a job title when the row had none")
+check(_written["pasted"]["Deadline"] == {"date": {"start": "2026-10-01"}}, "and the deadline")
+check("Reference Link" not in _written["pasted"], "no link is invented for a pasted row")
+check("notes" not in _written and "notes" not in _appended, "a notes-only row is left untouched")
+check("failed" in _written and "Job Title" not in _written["failed"],
+      "an unreadable link is filled in from the pasted text, keeping her own title")
+check("empty" not in _written and any(writer.FAIL_MARKER in str(b) for b in _appended.get("empty", [])),
+      "an unreadable link with nothing pasted gets the note")
+
+
 print(f"All {passed} offline checks passed.")

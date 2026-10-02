@@ -1,6 +1,6 @@
 """Work on rows that are already in Notion.
 
-- enrich_manual_rows(): you paste a link, the agent fills in the rest.
+- enrich_manual_rows(): you paste a link or a job description, the agent fills in the rest.
 - cover_letters(): tick "Cover Letter" under Next Action, get a draft.
 - patterns_report(): once a month, what your yes/no choices say.
 """
@@ -30,38 +30,80 @@ def _recent(row, days):
     return (dt.date.today() - created).days <= days
 
 
+POSTING_MIN_CHARS = 400
+AGENT_HEADINGS = (LETTER_MARKER, "Job agent notes")
+POSTING_HEADINGS = [h.lower() for h in CONFIG["notion"].get(
+    "posting_headings", ["job description", "job posting", "vacancy", "vacature"])]
+
+
+def pasted_posting(body: str, needs_heading: bool) -> str:
+    """The job description she pasted into a row's page.
+
+    The agent's own sections (notes, letter drafts, warnings) are left out.
+    With needs_heading, only text under one of her "Job Description" headings
+    counts, so a row holding nothing but interview notes is not mistaken for a
+    posting. Returns "" when what is there is too short to be one.
+    """
+    lines, keeping = [], not needs_heading
+    for line in (body or "").splitlines():
+        heading = re.match(r"^#{1,3}\s+(.*)$", line)
+        if heading:
+            label = heading.group(1).strip().lower()
+            if any(m.lower() in label for m in AGENT_HEADINGS):
+                break
+            if not keeping and any(h in label for h in POSTING_HEADINGS):
+                keeping = True
+                continue
+        if FAIL_MARKER in line or f"{LETTER_MARKER} not possible" in line:
+            continue
+        if keeping and line.strip():
+            lines.append(line.strip())
+    text = "\n".join(lines).strip()
+    return text if len(text) >= POSTING_MIN_CHARS else ""
+
+
 def enrich_manual_rows(db, rows, profile, taste):
+    """Fill in rows she added herself: from the link when it can be read,
+    otherwise from the job description pasted into the row's page."""
     lim = CONFIG["limits"]
-    todo = [r for r in rows if r.get("url") and r.get("score") is None
+    todo = [r for r in rows if r.get("score") is None
             and r.get("status") not in (ST["suggested"], ST["queue"])
-            and _recent(r, lim["enrich_rows_created_within_days"])][:lim["max_enrich_per_run"]]
-    if not todo:
-        return 0
-    print(f"[Your links] Filling in {len(todo)} row(s) you added")
-    done = 0
+            and _recent(r, lim["enrich_rows_created_within_days"])]
+    done = tried = 0
     for row in todo:
-        if FAIL_MARKER in db.page_text(row["id"]):
-            continue
-        job = sources.fetch_posting(row["url"])
+        if tried >= lim["max_enrich_per_run"]:
+            break
+        url = row.get("url") or ""
+        body = db.page_text(row["id"])
+        pasted = pasted_posting(body, needs_heading=not url)
+        job = None
+        if url and FAIL_MARKER not in body:
+            job = sources.fetch_posting(url)
+            if not job and not pasted:
+                db.append_blocks(row["id"], [callout(
+                    f"{FAIL_MARKER} automatically (the site may need a login or JavaScript). "
+                    "Paste the job description into this page and the agent fills in the "
+                    "rest on its next run.")])
+        if not job and pasted:
+            job = sources.make_job(url=url, title=row.get("title") or "", company=row.get("company") or "",
+                                   description=pasted, source="Pasted into the page")
         if not job:
-            db.append_blocks(row["id"], [callout(f"{FAIL_MARKER} automatically (the site may need a login or "
-                                                 "JavaScript). Paste the job description into this page "
-                                                 "and remove this note to retry.")])
             continue
-        job["url"] = row["url"]
-        job["loc_option"], job["loc_tier"] = filters.location_bucket(job.get("location", ""))
-        job["is_internship"] = filters.is_internship(job["title"])
-        job["is_trainee"] = filters.is_trainee(job["title"])
+        tried += 1
+        job["url"] = url
         result = scoring.deep_score(job, profile, taste)
         if not result:
-            print(f"  could not score {row['url']}")
+            print(f"  could not score {url or row.get('company')}")
             continue
         scoring.apply_result(job, result)
+        job["loc_option"], job["loc_tier"] = filters.location_bucket(job.get("location", ""))
+        job["is_internship"] = job["is_internship"] or filters.is_internship(job["title"])
+        job["is_trainee"] = job["is_trainee"] or filters.is_trainee(job["title"])
         props = db.build_properties(job, status=None, only_fill_empty_row=row)
         db.update_properties(row["id"], props)
         db.append_blocks(row["id"], [heading("Job agent notes", 2)] + job_blocks(job))
         done += 1
-        print(f"  {job['total']} · {job['title']} @ {job['company']}")
+        print(f"  [Your rows] {job['total']} · {job['title']} @ {job['company']} ({job['source']})")
     return done
 
 

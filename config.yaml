@@ -40,6 +40,9 @@ notion:
     job: Job
     internship: Internship
   cover_letter_trigger: Cover Letter   # Next Action option that triggers a draft
+  # A row with no link is filled in from the job description you paste under a
+  # heading with one of these names in the row's page.
+  posting_headings: [job description, job posting, vacancy, vacature]
 
 # ---------------------------------------------------------------------
 # COVER LETTERS. Tick "Cover Letter" under Next Action on a row and the

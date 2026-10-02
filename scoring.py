@@ -141,7 +141,7 @@ HOW TO SCORE
    - taste_match: similarity to roles she said yes to versus no to.
    - feasibility: 10 = realistic entry-level hire today. Subtract for required years she lacks, hard credentials, or daily client work in French at native level (her French is fluent but rusty: small penalty only). Learnable tools such as CLO 3D, PLM systems or a specific CRM: small penalty only.
 3. Track: "PR / Comms" (PR, communications, press, influencer or brand-events work, agency or in-house), "Fashion business", "Tech business", "Fashion-tech" (a company combining both), or "Wildcard" (outside her directions but a smart fit for her transferable skills).
-4. Flag internships and whether they require current student enrollment. Extract a deadline, salary and street address only if the posting states them.
+4. Flag internships and whether they require current student enrollment. Extract a deadline, salary and street address only if the posting states them. Give the job title and the location (city, plus state or country) as the posting states them, or leave them empty.
 
 Write reasons as specific evidence ("ran onboarding deliverables at TechWolf"), never generic praise. Be honest: a weak fit gets low scores.
 
@@ -160,6 +160,8 @@ Return ONLY this JSON:
   "deadline": "YYYY-MM-DD or empty",
   "salary": {{"min": null, "max": null, "currency": ""}},
   "address": "",
+  "title": "",
+  "location": "",
   "posting_language": "en|nl|fr|other"
 }}"""
 
@@ -215,6 +217,9 @@ def compute_total(subscores: dict, job: dict) -> float:
 def apply_result(job: dict, result: dict) -> dict:
     """Copy the deep-score result onto the job dict."""
     job["score_detail"] = result
+    for key in ("title", "location"):      # a pasted posting, or a page the reader got no location from
+        if not job.get(key) and isinstance(result.get(key), str):
+            job[key] = result[key].strip()
     job["track"] = result.get("track", "")
     job["freshness"] = freshness_score(job)
     job["total"] = compute_total(result["subscores"], job)

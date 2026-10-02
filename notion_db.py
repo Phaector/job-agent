@@ -106,7 +106,8 @@ def job_blocks(job: dict) -> list:
         blocks.append(bullet(f"Address: {job['address']}"))
     if salary_text(job.get("salary")):
         blocks.append(bullet(f"Salary: {salary_text(job['salary'])}"))
-    blocks.append(bullet(rt("Open the posting", link=job.get("url") or None)))
+    if job.get("url"):
+        blocks.append(bullet(rt("Open the posting", link=job["url"])))
     for other in (job.get("also_posted_on") or [])[:6]:
         if other.get("url"):
             blocks.append(bullet(rt("Also posted on: "), rt(other.get("source") or "another site", link=other["url"])))
