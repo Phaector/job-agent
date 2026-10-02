@@ -363,11 +363,39 @@ check(branding.classify_font("canela deck") is True, "a serif family is recognis
 check(branding.classify_font("söhne") is False, "a sans family is recognised")
 check(branding.brand_for("", "X")["accent"] == branding.NEUTRAL["accent"], "no website falls back")
 
+_profile_contact = """### Contact
+Put based in Ghent if the listing is in Belgium, if the listing is in New York, put new York.
+Tel US: +1 (617) 251 8864
+Tel BE: +324 963 946 33
+Mail: phaedra.imschoot@gmail.com
+"""
+_found = letter_pdf.phones_from_profile(_profile_contact)
+check(_found.get("us") == "+1 (617) 251 8864", "the US number is read from the profile")
+check(_found.get("be") == "+324 963 946 33", "the Belgian number is read from the profile")
+check(_found.get("email") == "phaedra.imschoot@gmail.com", "the email is read from the profile")
+check(letter_pdf.phones_from_profile("nothing here") == {}, "a profile without a Contact section is fine")
+check(letter_pdf.sender_for("New York", _profile_contact)["region"] == "us",
+      "a New York row uses the US block")
+for _loc in ("Ghent", "Antwerp", "Paris", "Amsterdam", "Belgium – other"):
+    check(letter_pdf.sender_for(_loc, _profile_contact)["region"] == "be",
+          f"a {_loc} row uses the Belgian block")
+check(letter_pdf.sender_for("Remote", _profile_contact)["region"] == "be",
+      "Remote falls back to the default region")
+check(letter_pdf.sender_for("", _profile_contact)["region"] == "be",
+      "a row with no location falls back too")
+check(letter_pdf.sender_for("New York", _profile_contact)["location"] == "New York",
+      "the US block says New York")
+check(letter_pdf.sender_for("Ghent", _profile_contact)["location"] == "Ghent",
+      "the Belgian block says Ghent")
+check(letter_pdf.sender_for("Ghent", "")["phone"].startswith("+32"),
+      "config supplies the number when the profile has none")
+
 _pdf = Path("/tmp/job-agent-test-letter.pdf")
 _pdf.unlink(missing_ok=True)
 letter_pdf.build_letter_pdf(_pdf, "First paragraph.\n\nSecond paragraph with <angle> & ampersand.",
                             "Example Co", "Press Coordinator",
-                            {"accent": "#C8102E", "ink": "#4C0611", "muted": "#C45D6E", "serif": False})
+                            {"accent": "#C8102E", "ink": "#4C0611", "muted": "#C45D6E", "serif": False},
+                            sender=letter_pdf.sender_for("New York", _profile_contact))
 check(_pdf.exists() and _pdf.stat().st_size > 1000, "a letter renders to a real PDF")
 check(_pdf.read_bytes()[:5] == b"%PDF-", "the file really is a PDF")
 _pdf.unlink(missing_ok=True)

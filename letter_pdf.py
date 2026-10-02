@@ -25,9 +25,51 @@ from reportlab.platypus import (BaseDocTemplate, Frame, PageTemplate, Paragraph,
 from settings import CONFIG, ROOT
 
 CFG = CONFIG.get("cover_letter", {})
-SENDER = CFG.get("sender", {})
 FONT_FILES = CFG.get("fonts", {}) or {}
 FONT_DIR = ROOT / "fonts"
+
+# Labels in the Contact section of the Notion profile. What she writes there
+# wins over config.yaml, so the numbers have one home she can edit.
+PHONE_LABELS = {"us": r"tel\.?\s*(?:us|usa|united states|amerika)",
+                "be": r"tel\.?\s*(?:be|belg\w*)"}
+
+
+def phones_from_profile(profile_text: str) -> dict:
+    """Pull 'Tel BE: ...', 'Tel US: ...' and 'Mail: ...' out of the profile."""
+    found = {}
+    for region, label in PHONE_LABELS.items():
+        m = re.search(label + r"\s*[:\-]\s*([+0-9()./\s-]{6,24})", profile_text or "", re.I)
+        if m:
+            found[region] = " ".join(m.group(1).split())
+    m = re.search(r"(?:^|\n)\s*(?:e-?)?mail\s*[:\-]\s*([\w.+-]+@[\w.-]+\.\w+)",
+                  profile_text or "", re.I)
+    if m:
+        found["email"] = m.group(1)
+    return found
+
+
+def sender_for(location: str = "", profile_text: str = "") -> dict:
+    """The contact block for one application, chosen by the row's Location.
+
+    A Belgian or other European posting gets the Belgian number and city; a
+    New York posting gets the US number. Remote and unknown fall back to the
+    default region.
+    """
+    cfg = CFG.get("sender", {}) or {}
+    regions = cfg.get("regions", {}) or {}
+    region = cfg.get("default_region", "be")
+    for key, spec in regions.items():
+        if location and location in (spec.get("locations") or []):
+            region = key
+            break
+    spec = regions.get(region, {}) or {}
+    found = phones_from_profile(profile_text)
+    return {"name": cfg.get("name", ""),
+            "email": found.get("email") or cfg.get("email", ""),
+            "phone": found.get(region) or spec.get("phone", ""),
+            "location": spec.get("location_line", ""),
+            "links": list(cfg.get("links") or []),
+            "region": region}
 
 PAGE_W, PAGE_H = A4
 MARGIN_X, MARGIN_TOP, MARGIN_BOTTOM = 24 * mm, 26 * mm, 22 * mm
@@ -65,16 +107,17 @@ def fonts_for(serif: bool) -> dict:
 class _Letterhead:
     """Draws the fixed furniture: the wordmark, the rule and the footer."""
 
-    def __init__(self, brand, fonts, company):
+    def __init__(self, brand, fonts, company, sender):
         self.accent = HexColor(brand.get("accent", "#1F1F1F"))
         self.muted = HexColor(brand.get("muted", "#6B6B6B"))
         self.ink = HexColor(brand.get("ink", "#141414"))
         self.fonts = fonts
         self.company = company
+        self.sender = sender
 
     def __call__(self, canvas, doc):
         canvas.saveState()
-        name = (SENDER.get("name") or "").upper()
+        name = (self.sender.get("name") or "").upper()
         canvas.saveState()                  # character spacing persists in the text
         wordmark = canvas.beginText(MARGIN_X, PAGE_H - MARGIN_TOP + 6 * mm)
         wordmark.setFont(self.fonts["display"], 13)
@@ -89,8 +132,8 @@ class _Letterhead:
         canvas.setLineWidth(1.6)
         canvas.line(MARGIN_X, rule_y, PAGE_W - MARGIN_X, rule_y)
 
-        bits = [SENDER.get("email"), SENDER.get("phone"), SENDER.get("location")]
-        bits += list(SENDER.get("links") or [])
+        bits = [self.sender.get("email"), self.sender.get("phone"), self.sender.get("location")]
+        bits += list(self.sender.get("links") or [])
         footer = "   ·   ".join(b for b in bits if b)
         if footer:
             line = canvas.beginText(MARGIN_X, MARGIN_BOTTOM - 8 * mm)
@@ -112,7 +155,7 @@ def _clean(text: str) -> str:
 
 
 def build_letter_pdf(path, letter: str, company: str, role: str, brand: dict,
-                     recipient: str = "") -> Path:
+                     recipient: str = "", sender: dict = None) -> Path:
     """Write the PDF and return its path.
 
     letter: the body, paragraphs separated by blank lines, no greeting or
@@ -120,6 +163,7 @@ def build_letter_pdf(path, letter: str, company: str, role: str, brand: dict,
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    sender = sender or sender_for()
     fonts = fonts_for(bool(brand.get("serif")))
     ink = HexColor(brand.get("ink", "#141414"))
     accent = HexColor(brand.get("accent", "#1F1F1F"))
@@ -137,13 +181,13 @@ def build_letter_pdf(path, letter: str, company: str, role: str, brand: dict,
     doc = BaseDocTemplate(str(path), pagesize=A4,
                           leftMargin=MARGIN_X, rightMargin=MARGIN_X,
                           topMargin=MARGIN_TOP, bottomMargin=MARGIN_BOTTOM,
-                          title=f"Cover letter — {SENDER.get('name', '')} — {company}",
-                          author=SENDER.get("name", ""), subject=role)
+                          title=f"Cover letter — {sender.get('name', '')} — {company}",
+                          author=sender.get("name", ""), subject=role)
     frame = Frame(MARGIN_X, MARGIN_BOTTOM, PAGE_W - 2 * MARGIN_X,
                   PAGE_H - MARGIN_TOP - MARGIN_BOTTOM, id="body",
                   leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
     doc.addPageTemplates([PageTemplate(id="letter", frames=[frame],
-                                       onPage=_Letterhead(brand, fonts, company))])
+                                       onPage=_Letterhead(brand, fonts, company, sender))])
 
     story = [Spacer(1, 6 * mm),
              Paragraph(f"{dt.date.today():%d %B %Y}", meta),
@@ -166,7 +210,7 @@ def build_letter_pdf(path, letter: str, company: str, role: str, brand: dict,
     story += [Spacer(1, 4 * mm),
               Paragraph("Kind regards,", signoff),
               Spacer(1, 2 * mm),
-              Paragraph(_clean(SENDER.get("name", "")), ParagraphStyle(
+              Paragraph(_clean(sender.get("name", "")), ParagraphStyle(
                   "name", parent=signoff, fontName=fonts["bold"]))]
     doc.build(story)
     return path

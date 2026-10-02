@@ -164,13 +164,15 @@ def cover_letters(db, rows, profile, only_page=None):
             continue
 
         brand = branding.brand_for(row.get("website") or job.get("website") or "", company)
+        sender = letter_pdf.sender_for(row.get("location") or "", profile)
         print(f"  [Letter] {company}: accent {brand['accent']}, "
-              f"{'serif' if brand['serif'] else 'sans'} ({brand.get('source')})")
+              f"{'serif' if brand['serif'] else 'sans'} ({brand.get('source')}); "
+              f"{sender['region'].upper()} contact details")
         pdf_path = attached = None
         try:
             pdf_path = letter_pdf.build_letter_pdf(
                 settings.LETTER_DIR / _letter_filename(company, role, version),
-                out["letter"], company, role, brand)
+                out["letter"], company, role, brand, sender=sender)
         except Exception as e:                      # never lose the text over a layout error
             print(f"  [Letter] could not render the PDF for {company}: {e}")
         if pdf_path:

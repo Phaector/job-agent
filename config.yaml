@@ -57,9 +57,21 @@ cover_letter:
   sender:                         # printed on the letterhead; empty lines are left out
     name: Phaedra Imschoot
     email: phaedra.imschoot@gmail.com
-    phone: ""                     # fill in to have it appear in the footer
-    location: ""                  # e.g. "Ghent, Belgium" or "New York, NY"
     links: []                     # e.g. ["linkedin.com/in/..."]
+    # Which contact block to print, chosen by the row's Location.
+    # The phone numbers and email below are only a fallback: the Contact
+    # section of your Notion profile page wins, so edit them there
+    # ("Tel BE: ...", "Tel US: ...", "Mail: ...").
+    default_region: be            # used for Remote and anything unlisted
+    regions:
+      be:
+        locations: [Antwerp, Brussels, Ghent, Leuven, "Belgium – other", Paris, Amsterdam]
+        location_line: Ghent
+        phone: "+32 496 39 46 33"
+      us:
+        locations: [New York]
+        location_line: New York
+        phone: "+1 (617) 251 8864"
   fonts: {}                       # optional: drop .ttf files in fonts/ and name them here,
                                   # e.g. {body: Jost-Regular.ttf, body_bold: Jost-SemiBold.ttf}
   branding:
