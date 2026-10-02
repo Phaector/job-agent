@@ -326,4 +326,56 @@ check(fake_db("rich_text").build_properties(scored_job, status="Suggested").get(
       "a Status of the wrong type is left alone")
 
 
+# ── Cover letters: her own notes, branding, PDF ──
+import branding          # noqa: E402
+import letter_pdf        # noqa: E402
+import writer            # noqa: E402
+
+page_body = """## Fit
+- Why it fits: fashion brand on the business side.
+## My Cover Letter draft
+I have a strong passion for the fashion industry and branding.
+Maybe I should link my assignments in the cover letter.
+## Resume changes
+- Replace Boston, MA with your Belgian city.
+"""
+notes = writer.her_draft(page_body)
+check("passion for the fashion industry" in notes, "her own section is read")
+check("link my assignments" in notes, "her instructions to the writer are kept")
+check("Belgian city" not in notes, "the resume section is not swept in")
+check("business side" not in notes, "the agent's own Fit section is not swept in")
+check(writer.her_draft("## Notes\nnothing of hers here") == "", "no section means no notes")
+
+check(branding.parse_color("#C8102E") == (200, 16, 46), "hex colour parsed")
+check(branding.parse_color("#abc") == (170, 187, 204), "short hex expanded")
+check(branding.parse_color("rgba(1,2,3,0)") is None, "a transparent colour is not a brand colour")
+check(branding.parse_color("teal") is None, "an unparseable colour is skipped")
+check(branding.is_usable_accent((200, 16, 46)), "a saturated red is usable as an accent")
+check(not branding.is_usable_accent((255, 255, 255)), "white is not an accent")
+check(not branding.is_usable_accent((138, 138, 138)), "grey is not an accent")
+sample_css = (":root{--color-brand:#C8102E;--grey-500:#8A8A8A}"
+              "body{color:#111;font-family:'Söhne',Arial,sans-serif}"
+              "h1{font-family:'Canela Deck',Georgia,serif}")
+scored = branding._colour_candidates(sample_css)
+check(max(scored, key=scored.get) == (200, 16, 46), "the declared brand colour outranks the greys")
+check(branding._font_candidates(sample_css)[0] == "söhne", "the body family is found first")
+check(branding.classify_font("canela deck") is True, "a serif family is recognised")
+check(branding.classify_font("söhne") is False, "a sans family is recognised")
+check(branding.brand_for("", "X")["accent"] == branding.NEUTRAL["accent"], "no website falls back")
+
+_pdf = Path("/tmp/job-agent-test-letter.pdf")
+_pdf.unlink(missing_ok=True)
+letter_pdf.build_letter_pdf(_pdf, "First paragraph.\n\nSecond paragraph with <angle> & ampersand.",
+                            "Example Co", "Press Coordinator",
+                            {"accent": "#C8102E", "ink": "#4C0611", "muted": "#C45D6E", "serif": False})
+check(_pdf.exists() and _pdf.stat().st_size > 1000, "a letter renders to a real PDF")
+check(_pdf.read_bytes()[:5] == b"%PDF-", "the file really is a PDF")
+_pdf.unlink(missing_ok=True)
+check(writer._letter_filename("Karla Otto", "Account Coordinator", 1).endswith(".pdf"),
+      "letter filenames end in .pdf")
+check("v2" in writer._letter_filename("Karla Otto", "Account Coordinator", 2),
+      "a second letter is versioned")
+check("/" not in writer._letter_filename("A/B Co", "Role", 1), "slashes never reach the filename")
+
+
 print(f"All {passed} offline checks passed.")

@@ -6,6 +6,7 @@ and everything that isn't a column goes into the page body.
 """
 import datetime as dt
 import time
+from pathlib import Path
 
 import requests
 
@@ -219,7 +220,7 @@ class NotionDB:
                     "status": g("status"), "score": g("score"), "date_found": g("date_found"),
                     "next_action": g("next_action") or [], "why_not": g("why_not") or "",
                     "track": g("track"), "location": g("location"), "type": g("type"),
-                    "deadline": g("deadline"),
+                    "deadline": g("deadline"), "website": g("website") or "",
                 })
             if not data.get("has_more"):
                 break
@@ -328,6 +329,72 @@ class NotionDB:
             print(f"  [Notion] '{P['status']}' is not a select or status field; cannot set it")
             return False
         return self.update_properties(page_id, {P["status"]: value})
+
+    def set_next_action(self, page_id, options):
+        """Replace the Next Action multi-select with exactly these options."""
+        name = P.get("next_action")
+        if self.schema.get(name) != "multi_select":
+            return False
+        return self.update_properties(
+            page_id, {name: {"multi_select": [{"name": o} for o in options]}})
+
+    # ── file uploads ──
+    def upload_file(self, path, content_type="application/pdf"):
+        """Put a file in Notion's storage and return its file_upload id.
+
+        Three steps: ask for an upload, send the bytes to the URL it gives
+        back, then the id can be attached to a page or property. Returns None
+        on any failure, so a letter still lands as text if this part breaks.
+        """
+        path = Path(path)
+        if self.dry_run:
+            print(f"    [dry run] would upload {path.name}")
+            return "dry-run"
+        created = self._req("POST", "/file_uploads", {
+            "filename": path.name, "content_type": content_type})
+        if not created or not created.get("upload_url"):
+            print(f"  [Notion] Could not start an upload for {path.name}. "
+                  "The integration may not have file upload enabled.")
+            return None
+        try:
+            with open(path, "rb") as fh:
+                r = requests.post(
+                    created["upload_url"],
+                    headers={"Authorization": f"Bearer {settings.NOTION_API_KEY}",
+                             "Notion-Version": NOTION_VERSION},
+                    files={"file": (path.name, fh, content_type)}, timeout=120)
+        except requests.RequestException as e:
+            print(f"  [Notion] Upload of {path.name} failed: {e}")
+            return None
+        if r.status_code >= 400:
+            print(f"  [Notion {r.status_code}] upload of {path.name}: {r.text[:300]}")
+            return None
+        time.sleep(0.35)
+        return created["id"]
+
+    def attach_file(self, page_id, prop_name, upload_id, display_name):
+        """Add an uploaded file to a Files & media property, keeping what's there."""
+        # The REST API calls this type "files"; Notion's own schema says "file".
+        if self.schema.get(prop_name) not in ("files", "file"):
+            print(f"  [Notion] '{prop_name}' is not a Files & media property "
+                  f"({self.schema.get(prop_name) or 'missing'}); skipping the attachment.")
+            return False
+        existing = []
+        page = self._req("GET", f"/pages/{page_id}")
+        if page:
+            current = (page.get("properties", {}).get(prop_name) or {}).get("files", []) or []
+            for f in current:
+                if f.get("type") == "external":
+                    existing.append({"name": f.get("name", "file"), "type": "external",
+                                     "external": f["external"]})
+                elif f.get("type") == "file_upload":
+                    existing.append(f)
+                # A "file" entry is Notion-hosted behind an expiring url and
+                # cannot be written back, so previous PDFs drop off the
+                # property over time. The text version stays on the page.
+        files = existing + [{"type": "file_upload", "name": display_name,
+                             "file_upload": {"id": upload_id}}]
+        return self.update_properties(page_id, {prop_name: {"files": files[-8:]}})
 
     def append_blocks(self, page_id, blocks):
         if self.dry_run:

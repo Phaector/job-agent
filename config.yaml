@@ -18,6 +18,7 @@ notion:
     job_title: Job Title
     status: Status
     link: Reference Link
+    website: Website            # the company's own site, used to read its brand colours
     type: Type
     location: Location          # select field
     score: Score                # number field
@@ -39,6 +40,32 @@ notion:
     job: Job
     internship: Internship
   cover_letter_trigger: Cover Letter   # Next Action option that triggers a draft
+
+# ---------------------------------------------------------------------
+# COVER LETTERS. Tick "Cover Letter" under Next Action on a row and the
+# agent writes the letter, renders it as a PDF on your own letterhead in
+# the company's accent colour, attaches it to that row, and unticks the
+# box. Tick it again to get a new version; the old text stays on the page.
+# ---------------------------------------------------------------------
+cover_letter:
+  files_property: Cover Letter    # Files & media property the PDF is attached to
+  # Headings in a row's page under which YOUR OWN notes live. Everything
+  # until the next heading is read as your material: both the content and
+  # any instruction to the writer ("say I'm open to other entry-level roles").
+  draft_headings: [my cover letter, my letter, my draft, my notes for the letter]
+  keep_old_versions: true         # a new letter is added below the old one, never over it
+  sender:                         # printed on the letterhead; empty lines are left out
+    name: Phaedra Imschoot
+    email: phaedra.imschoot@gmail.com
+    phone: ""                     # fill in to have it appear in the footer
+    location: ""                  # e.g. "Ghent, Belgium" or "New York, NY"
+    links: []                     # e.g. ["linkedin.com/in/..."]
+  fonts: {}                       # optional: drop .ttf files in fonts/ and name them here,
+                                  # e.g. {body: Jost-Regular.ttf, body_bold: Jost-SemiBold.ttf}
+  branding:
+    enabled: true                 # false means one plain house style for every letter
+    fallback_accent: "#1F1F1F"    # used when a site gives us nothing
+    max_css_bytes: 400000
 
 # ---------------------------------------------------------------------
 # LIMITS

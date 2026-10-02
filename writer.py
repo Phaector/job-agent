@@ -7,7 +7,9 @@
 import datetime as dt
 import re
 
+import branding
 import filters
+import letter_pdf
 import scoring
 import settings
 import sources
@@ -71,48 +73,133 @@ CANDIDATE PROFILE:
 
 RULES
 - Write in the language of the posting (English, Dutch or French).
-- 250 to 330 words, 3 or 4 short paragraphs, addressed to the hiring team unless a name is given.
+- 250 to 330 words, 3 or 4 short paragraphs.
+- Write the BODY ONLY. No date, no address block, no "Dear ...", no "Kind regards" and no name: those are set by the template.
 - Open with the specific reason this role and company fit her, not with "I am writing to apply".
 - Pick the 2 or 3 strongest pieces of evidence from her profile for what THIS role needs and say what she did, concretely.
 - Never invent experience, numbers, tools or motivations. If the letter needs something only she can answer (why this company, a personal link to the brand), write a placeholder in [square brackets].
 - Mention US work authorization only if the posting raises sponsorship.
 - Style: plain, direct, human. Active voice. No adverbs. No em dashes. No "not X, but Y" constructions. No throat-clearing ("I'm excited to", "I believe that"). No grand closing one-liners. Vary sentence length. Name specific things instead of vague claims.
 
+HER OWN NOTES
+{her_notes}
+
+How to use those notes, when there are any: they are the most important input you have, above the profile. They hold two things at once and you must honour both.
+- Content and voice: the reasons she actually gives for wanting this role, in her own words. Keep her reasons and her phrasing. Do not replace them with smoother wording of your own, and do not add motivations she did not express.
+- Instructions to you: she often writes to herself about what the letter should do ("maybe I should link my assignments", "put in that I am open to other entry-level positions"). Treat each of those as an instruction and carry it out in the letter. Do not quote the instruction itself.
+Her notes may be dictated and rambling, with repetition and false starts. Read through that for the intent. If a note contradicts the profile, the note wins. If she asks for something that needs a fact she has not given you, leave a [square bracket] placeholder.
+
 Return ONLY JSON:
-{{"letter": "<paragraphs separated by blank lines>",
+{{"letter": "<body paragraphs separated by blank lines>",
+  "used_from_her_notes": ["<each instruction of hers you carried out, a few words each>"],
   "cv_emphasis": ["<3 CV points to move to the top for this role>"],
   "fill_in": ["<questions she must answer herself before sending>"]}}"""
 
 
-def cover_letters(db, rows, profile):
+def her_draft(body: str) -> str:
+    """The text she wrote herself under one of her own headings.
+
+    Reads from a heading whose text matches config (e.g. "## My Cover Letter
+    draft") down to the next heading, so the agent's own sections are skipped.
+    """
+    wanted = [h.lower() for h in CONFIG["cover_letter"].get("draft_headings", [])]
+    if not wanted:
+        return ""
+    chunks, keeping = [], False
+    for line in (body or "").splitlines():
+        heading = re.match(r"^#{1,3}\s+(.*)$", line)
+        if heading:
+            label = heading.group(1).strip().lower()
+            keeping = any(w in label for w in wanted)
+            continue
+        if keeping and line.strip():
+            chunks.append(line.strip())
+    return "\n".join(chunks).strip()
+
+
+def _letter_filename(company: str, role: str, version: int) -> str:
+    stem = re.sub(r"[^\w]+", "-", f"{company} {role}".strip()).strip("-")[:70] or "cover-letter"
+    suffix = f"-v{version}" if version > 1 else ""
+    return f"Cover letter - {stem}{suffix}.pdf"
+
+
+def cover_letters(db, rows, profile, only_page=None):
+    """Write, render and attach a letter for every row ticked "Cover Letter".
+
+    With only_page set, just that row is handled: that is what the instant
+    trigger passes in. The tick is removed once a letter lands, so ticking it
+    again asks for a new version rather than being ignored.
+    """
+    cfg = CONFIG["cover_letter"]
     trigger = CONFIG["notion"]["cover_letter_trigger"]
-    todo = [r for r in rows if trigger in (r.get("next_action") or []) and r.get("url")]
+    todo = [r for r in rows if trigger in (r.get("next_action") or [])]
+    if only_page:
+        todo = [r for r in todo if r["id"].replace("-", "") == only_page.replace("-", "")]
+        if not todo:
+            print(f"  [Cover letter] {only_page} is not ticked for a letter; nothing to do")
     count = 0
     for row in todo:
+        company = row.get("company") or ""
         body = db.page_text(row["id"])
-        if LETTER_MARKER in body:
-            continue
-        job = sources.fetch_posting(row["url"]) or {}
+        version = len(re.findall(re.escape(LETTER_MARKER), body)) + 1
+        job = sources.fetch_posting(row["url"]) if row.get("url") else {}
+        job = job or {}
         posting = job.get("description") or body
-        if len(posting) < 200:
-            db.append_blocks(row["id"], [callout(f"{LETTER_MARKER} not possible yet: the agent couldn't read the "
-                                                 "posting. Paste the job description into this page.")])
+        notes = her_draft(body)
+        if len(posting) < 200 and not notes:
+            db.append_blocks(row["id"], [callout(
+                f"{LETTER_MARKER} not possible yet: the agent couldn't read the posting and "
+                f"found no notes of yours. Paste the job description into this page, or write "
+                f"your own thoughts under a '## My cover letter' heading, then tick Cover Letter again.")])
             continue
-        user = (f"ROLE: {row.get('title') or job.get('title', '')}\nCOMPANY: {row.get('company') or job.get('company', '')}\n\n"
+        role = row.get("title") or job.get("title", "")
+        user = (f"ROLE: {role}\nCOMPANY: {company or job.get('company', '')}\n\n"
                 f"POSTING:\n{posting[:7000]}")
-        out = scoring.parse_json(scoring.ask(settings.MODEL_DEEP, LETTER_SYSTEM.format(profile=profile), user, 2000))
+        system = LETTER_SYSTEM.format(
+            profile=profile,
+            her_notes=notes or "(she has not written anything herself for this role)")
+        out = scoring.parse_json(scoring.ask(settings.MODEL_DEEP, system, user, 2000))
         if not isinstance(out, dict) or not out.get("letter"):
-            print(f"  could not draft a letter for {row.get('company')}")
+            print(f"  could not draft a letter for {company}")
             continue
-        blocks = [heading(f"✍️ {LETTER_MARKER} (Claude)", 2)]
+
+        brand = branding.brand_for(row.get("website") or job.get("website") or "", company)
+        print(f"  [Letter] {company}: accent {brand['accent']}, "
+              f"{'serif' if brand['serif'] else 'sans'} ({brand.get('source')})")
+        pdf_path = attached = None
+        try:
+            pdf_path = letter_pdf.build_letter_pdf(
+                settings.LETTER_DIR / _letter_filename(company, role, version),
+                out["letter"], company, role, brand)
+        except Exception as e:                      # never lose the text over a layout error
+            print(f"  [Letter] could not render the PDF for {company}: {e}")
+        if pdf_path:
+            upload_id = db.upload_file(pdf_path)
+            if upload_id:
+                attached = db.attach_file(row["id"], cfg["files_property"],
+                                          upload_id, pdf_path.name)
+
+        blocks = [heading(f"✍️ {LETTER_MARKER} {version} · {dt.date.today():%d %b %Y}", 2)]
+        if not attached and pdf_path:
+            blocks.append(callout("The PDF could not be attached to this row, so the text is "
+                                  "below. Check that a Files & media property named "
+                                  f"'{cfg['files_property']}' exists."))
         blocks += [paragraph(p.strip()) for p in re.split(r"\n\s*\n", out["letter"]) if p.strip()]
+        if out.get("used_from_her_notes"):
+            blocks += [heading("From your own notes", 3)] + [bullet(x) for x in out["used_from_her_notes"][:6]]
         if out.get("cv_emphasis"):
             blocks += [heading("Put these CV points first", 3)] + [bullet(x) for x in out["cv_emphasis"][:4]]
         if out.get("fill_in"):
             blocks += [heading("Answer these yourself before sending", 3)] + [bullet(x) for x in out["fill_in"][:4]]
         db.append_blocks(row["id"], blocks)
+
+        if attached:
+            remaining = [o for o in (row.get("next_action") or []) if o != trigger]
+            db.set_next_action(row["id"], remaining)
         count += 1
-        print(f"  [Cover letter] drafted for {row.get('company')}")
+        print(f"  [Cover letter] v{version} for {company}"
+              f"{' (attached)' if attached else ' (text only)'}"
+              f"{' · used your notes' if notes else ''}")
     return count
 
 

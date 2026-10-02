@@ -1,0 +1,172 @@
+"""Render a cover letter as a PDF on Phaedra's own letterhead.
+
+Her name is the mark. The company contributes an accent colour and whether the
+text is serif, both read off their site by branding.py. Their logo never
+appears: a letter carrying someone's logo reads as issued by them.
+
+Typography uses the fonts built into every PDF reader, so a letter never fails
+to render. To use a real typeface for a particular application, drop a .ttf
+into fonts/ and name it under cover_letter.fonts in config.yaml.
+"""
+import datetime as dt
+import re
+from pathlib import Path
+
+from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_JUSTIFY
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (BaseDocTemplate, Frame, PageTemplate, Paragraph,
+                                Spacer)
+
+from settings import CONFIG, ROOT
+
+CFG = CONFIG.get("cover_letter", {})
+SENDER = CFG.get("sender", {})
+FONT_FILES = CFG.get("fonts", {}) or {}
+FONT_DIR = ROOT / "fonts"
+
+PAGE_W, PAGE_H = A4
+MARGIN_X, MARGIN_TOP, MARGIN_BOTTOM = 24 * mm, 26 * mm, 22 * mm
+
+
+def _register_custom_fonts():
+    """Any .ttf named in config, so a specific application can use real type."""
+    pairs = {}
+    for role in ("body", "body_bold", "heading"):
+        filename = FONT_FILES.get(role)
+        if not filename:
+            continue
+        path = FONT_DIR / filename
+        if not path.exists():
+            print(f"  [Letter] font {filename} is named in config but not in fonts/")
+            continue
+        name = f"custom-{role}"
+        try:
+            pdfmetrics.registerFont(TTFont(name, str(path)))
+            pairs[role] = name
+        except Exception as e:                       # a bad file must not stop a letter
+            print(f"  [Letter] could not load {filename}: {e}")
+    return pairs
+
+
+def fonts_for(serif: bool) -> dict:
+    """Body, bold and display faces. Custom files win, else the built-ins."""
+    custom = _register_custom_fonts()
+    base = ("Times-Roman", "Times-Bold") if serif else ("Helvetica", "Helvetica-Bold")
+    return {"body": custom.get("body", base[0]),
+            "bold": custom.get("body_bold", base[1]),
+            "display": custom.get("heading", custom.get("body_bold", base[1]))}
+
+
+class _Letterhead:
+    """Draws the fixed furniture: the wordmark, the rule and the footer."""
+
+    def __init__(self, brand, fonts, company):
+        self.accent = HexColor(brand.get("accent", "#1F1F1F"))
+        self.muted = HexColor(brand.get("muted", "#6B6B6B"))
+        self.ink = HexColor(brand.get("ink", "#141414"))
+        self.fonts = fonts
+        self.company = company
+
+    def __call__(self, canvas, doc):
+        canvas.saveState()
+        name = (SENDER.get("name") or "").upper()
+        canvas.saveState()                  # character spacing persists in the text
+        wordmark = canvas.beginText(MARGIN_X, PAGE_H - MARGIN_TOP + 6 * mm)
+        wordmark.setFont(self.fonts["display"], 13)
+        wordmark.setFillColor(self.ink)
+        wordmark.setCharSpace(2.6)          # only text objects can track letters
+        wordmark.textOut(name)
+        canvas.drawText(wordmark)
+        canvas.restoreState()               # state, so it must not leak to the footer
+
+        rule_y = PAGE_H - MARGIN_TOP + 2 * mm
+        canvas.setStrokeColor(self.accent)
+        canvas.setLineWidth(1.6)
+        canvas.line(MARGIN_X, rule_y, PAGE_W - MARGIN_X, rule_y)
+
+        bits = [SENDER.get("email"), SENDER.get("phone"), SENDER.get("location")]
+        bits += list(SENDER.get("links") or [])
+        footer = "   ·   ".join(b for b in bits if b)
+        if footer:
+            line = canvas.beginText(MARGIN_X, MARGIN_BOTTOM - 8 * mm)
+            line.setFont(self.fonts["body"], 7.6)
+            line.setFillColor(self.muted)
+            line.setCharSpace(0)
+            line.textOut(footer)
+            canvas.drawText(line)
+        canvas.setStrokeColor(self.accent)
+        canvas.setLineWidth(0.6)
+        canvas.line(MARGIN_X, MARGIN_BOTTOM - 4.5 * mm, MARGIN_X + 16 * mm, MARGIN_BOTTOM - 4.5 * mm)
+        canvas.restoreState()
+
+
+def _clean(text: str) -> str:
+    """Letter text into paragraph markup, escaping what reportlab would eat."""
+    out = (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def build_letter_pdf(path, letter: str, company: str, role: str, brand: dict,
+                     recipient: str = "") -> Path:
+    """Write the PDF and return its path.
+
+    letter: the body, paragraphs separated by blank lines, no greeting or
+    sign-off of its own; those are set here so every letter is laid out alike.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fonts = fonts_for(bool(brand.get("serif")))
+    ink = HexColor(brand.get("ink", "#141414"))
+    accent = HexColor(brand.get("accent", "#1F1F1F"))
+    muted = HexColor(brand.get("muted", "#6B6B6B"))
+
+    body = ParagraphStyle("body", fontName=fonts["body"], fontSize=10.1, leading=15.4,
+                          textColor=ink, alignment=TA_JUSTIFY, spaceAfter=7.2)
+    meta = ParagraphStyle("meta", parent=body, fontSize=8.4, leading=12,
+                          textColor=muted, alignment=0, spaceAfter=0)
+    greeting = ParagraphStyle("greeting", parent=body, spaceAfter=9, alignment=0)
+    signoff = ParagraphStyle("signoff", parent=body, alignment=0, spaceAfter=0)
+    role_style = ParagraphStyle("role", parent=body, fontName=fonts["bold"], fontSize=9.4,
+                                leading=13, textColor=accent, alignment=0, spaceAfter=14)
+
+    doc = BaseDocTemplate(str(path), pagesize=A4,
+                          leftMargin=MARGIN_X, rightMargin=MARGIN_X,
+                          topMargin=MARGIN_TOP, bottomMargin=MARGIN_BOTTOM,
+                          title=f"Cover letter — {SENDER.get('name', '')} — {company}",
+                          author=SENDER.get("name", ""), subject=role)
+    frame = Frame(MARGIN_X, MARGIN_BOTTOM, PAGE_W - 2 * MARGIN_X,
+                  PAGE_H - MARGIN_TOP - MARGIN_BOTTOM, id="body",
+                  leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
+    doc.addPageTemplates([PageTemplate(id="letter", frames=[frame],
+                                       onPage=_Letterhead(brand, fonts, company))])
+
+    story = [Spacer(1, 6 * mm),
+             Paragraph(f"{dt.date.today():%d %B %Y}", meta),
+             Spacer(1, 7 * mm)]
+    if company:
+        story.append(Paragraph(_clean(company), ParagraphStyle(
+            "company", parent=body, fontName=fonts["bold"], fontSize=10.4, alignment=0, spaceAfter=1)))
+    if role:
+        story.append(Paragraph(_clean(role), role_style))
+    if recipient:
+        salutation = recipient
+    elif company:
+        salutation = f"Dear {company} team,"
+    else:
+        salutation = "Dear hiring team,"
+    story.append(Paragraph(_clean(salutation), greeting))
+    for para in re.split(r"\n\s*\n", letter or ""):
+        if para.strip():
+            story.append(Paragraph(_clean(para), body))
+    story += [Spacer(1, 4 * mm),
+              Paragraph("Kind regards,", signoff),
+              Spacer(1, 2 * mm),
+              Paragraph(_clean(SENDER.get("name", "")), ParagraphStyle(
+                  "name", parent=signoff, fontName=fonts["bold"]))]
+    doc.build(story)
+    return path

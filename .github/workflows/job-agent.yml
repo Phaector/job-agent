@@ -4,18 +4,26 @@ on:
   schedule:
     - cron: "0 11 */3 * *"   # search every 3 days, 7:00 New York summer time (6:00 in winter)
     - cron: "30 */2 * * *"   # every 2 hours: your added links + cover letters
+  repository_dispatch:
+    # Sent from Notion the moment you tick "Cover Letter" on a row. The relay
+    # that turns Notion's webhook into this call may pass the row's page id as
+    # client_payload.page_id, and then only that row is handled.
+    types: [notion-cover-letter]
   workflow_dispatch:
     inputs:
       mode:
         description: "What to run"
         type: choice
         default: daily
-        options: [daily, light, next, patterns, note, mailcheck]
+        options: [daily, light, letters, next, patterns, note, mailcheck]
       count:
         description: "Rows to move from Queue to Suggested (mode 'next')"
         default: "10"
       note:
         description: "Feedback for your profile page (mode 'note'); separate points with |"
+        default: ""
+      page:
+        description: "One Notion page id (mode 'letters'); blank means every ticked row"
         default: ""
 
 permissions:
@@ -42,8 +50,12 @@ jobs:
       - name: Pick mode
         id: mode
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "mode=letters" >> "$GITHUB_OUTPUT"
+            echo "page=${{ github.event.client_payload.page_id }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+            echo "page=${{ inputs.page }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "0 11 */3 * *" ]; then
             # Repo variable SKIP_DAILY_UNTIL (YYYY-MM-DD): skip the daily search up to and including that date
             if [[ "$(date -u +%F)" < "${{ vars.SKIP_DAILY_UNTIL }}" || "$(date -u +%F)" = "${{ vars.SKIP_DAILY_UNTIL }}" ]]; then
@@ -68,7 +80,7 @@ jobs:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTE: ${{ inputs.note }}
-        run: python main.py --mode "${{ steps.mode.outputs.mode }}" --count "${{ inputs.count || '10' }}" --note "$NOTE"
+        run: python main.py --mode "${{ steps.mode.outputs.mode }}" --count "${{ inputs.count || '10' }}" --note "$NOTE" --page "${{ steps.mode.outputs.page }}"
 
       - name: Remember screened postings and newsletter emails
         if: steps.mode.outputs.mode == 'daily'
