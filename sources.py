@@ -15,6 +15,7 @@ import email.utils
 import html
 import imaplib
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -34,6 +35,17 @@ SESSION.headers.update({
 })
 
 IMAP_TIMEOUT = 30          # never let an unreachable mail server hang a run
+
+
+def annotate(level: str, message: str):
+    """Report a result as a GitHub Actions annotation as well as on stdout.
+
+    Run logs are served from a host the agent itself cannot reach, so an
+    annotation is the only part of a run that can be read back through the
+    API. level is notice, warning or error.
+    """
+    if os.environ.get("GITHUB_ACTIONS"):
+        print(f"::{level}::{' '.join(str(message).split())}")
 ADZUNA_CURRENCY = {"us": "USD", "be": "EUR", "fr": "EUR", "nl": "EUR"}
 
 
@@ -585,23 +597,27 @@ def mail_probe():
     pw = settings.GMAIL_APP_PASSWORD
     print(f"GMAIL_APP_PASSWORD: {f'set, {len(pw)} characters' if pw else 'NOT SET'}")
     if not (settings.GMAIL_ADDRESS and settings.GMAIL_APP_PASSWORD):
-        print("\nResult: the email source is switched off, because a secret is missing.")
-        print("Add GMAIL_ADDRESS and GMAIL_APP_PASSWORD under Settings -> Secrets and")
-        print("variables -> Actions. An app password is 16 characters, spaces allowed.")
+        missing = " and ".join(n for n, v in (("GMAIL_ADDRESS", settings.GMAIL_ADDRESS),
+                                              ("GMAIL_APP_PASSWORD", settings.GMAIL_APP_PASSWORD)) if not v)
+        annotate("error", f"Gmail is switched off: {missing} is not set. Add it under "
+                          "Settings, Secrets and variables, Actions.")
+        print(f"\nResult: the email source is switched off, because {missing} is missing.")
         return False
     try:
         box = imaplib.IMAP4_SSL("imap.gmail.com", timeout=IMAP_TIMEOUT)
     except OSError as e:
+        annotate("error", f"Could not reach imap.gmail.com: {e}")
         print(f"\nResult: could not reach imap.gmail.com: {e}")
         return False
     try:
         box.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
         print("Login:              OK")
     except imaplib.IMAP4.error as e:
+        annotate("error", f"Gmail refused the login for {_mask(settings.GMAIL_ADDRESS)}: {e}. "
+                          "The app password is wrong, was revoked, or belongs to another "
+                          "account. Make a new one at myaccount.google.com/apppasswords.")
         print(f"Login:              FAILED ({e})")
-        print("\nResult: Gmail refused the login. Usually the app password was revoked,")
-        print("or it belongs to a different account than GMAIL_ADDRESS. Make a new one")
-        print("at myaccount.google.com/apppasswords and update the secret.")
+        print("\nResult: Gmail refused the login.")
         return False
     mailbox = '"[Gmail]/All Mail"'
     if box.select(mailbox, readonly=True)[0] != "OK":
@@ -615,12 +631,13 @@ def mail_probe():
     since = f"{since_day.day:02d}-{MONTHS[since_day.month - 1]}-{since_day.year}"
     print(f"Looking back to:    {since_day} ({cfg['lookback_days']} days)")
     seen_before = _read_mail_state()
-    total = 0
+    total, counts = 0, []
     for src in cfg.get("sources") or []:
         addr, name = src.get("from", ""), src.get("name") or src.get("from", "")
         status, data = box.search(None, f'(SINCE {since} FROM "{addr}")')
         nums = (data[0].split() if status == "OK" and data and data[0] else [])
         total += len(nums)
+        counts.append(f"{name}: {len(nums)}")
         print(f"\n  {name} <{addr}>")
         print(f"    {len(nums)} emails in the window")
         for num in nums[-3:]:
@@ -632,11 +649,13 @@ def mail_probe():
             mark = "already read" if key in seen_before else "NEW, would be read"
             print(f"    - {clean(msg.get('Date'))[:25]} | {clean(msg.get('Subject'))[:60]} | {mark}")
     box.logout()
-    print(f"\nResult: the connection works. {total} emails matched across "
-          f"{len(cfg.get('sources') or [])} senders.")
-    if not total:
-        print("No matches, so check the sender addresses under newsletter.sources in")
-        print("config.yaml against what the emails actually come from.")
+    per_sender = "; ".join(counts) or "no senders configured"
+    summary = (f"Gmail works for {_mask(settings.GMAIL_ADDRESS)}: {total} emails matched "
+               f"across {len(cfg.get('sources') or [])} senders ({per_sender}).")
+    annotate("notice" if total else "warning",
+             summary if total else summary + " No matches, so check the sender addresses "
+                                             "under newsletter.sources in config.yaml.")
+    print("\nResult: " + summary)
     return True
 
 
