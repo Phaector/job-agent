@@ -613,11 +613,16 @@ def mail_probe():
         box.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
         print("Login:              OK")
     except imaplib.IMAP4.error as e:
+        pw = settings.GMAIL_APP_PASSWORD
+        shape = (f"the secret is {len(pw)} characters"
+                 f"{' with spaces' if ' ' in pw else ''}; a Google app password is 16 letters "
+                 f"(19 if you keep the spaces)")
         annotate("error", f"Gmail refused the login for {_mask(settings.GMAIL_ADDRESS)}: {e}. "
-                          "The app password is wrong, was revoked, or belongs to another "
-                          "account. Make a new one at myaccount.google.com/apppasswords.")
+                          f"{shape}. If that length looks like your normal account password, "
+                          "that is the problem: Gmail only accepts an app password over IMAP. "
+                          "Make one at myaccount.google.com/apppasswords.")
         print(f"Login:              FAILED ({e})")
-        print("\nResult: Gmail refused the login.")
+        print(f"\nResult: Gmail refused the login. {shape}.")
         return False
     mailbox = '"[Gmail]/All Mail"'
     if box.select(mailbox, readonly=True)[0] != "OK":
