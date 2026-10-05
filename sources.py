@@ -584,6 +584,30 @@ def _mask(address: str) -> str:
     return f"{name[:1]}{'*' * max(len(name) - 1, 0)}@{host}" if host else "(not set)"
 
 
+def _all_mail_box(box) -> str:
+    """The All Mail folder, whatever this account's language calls it.
+
+    Gmail marks it \\All in a LIST response, so the name is never guessed.
+    This matters more than it looks: falling back to INBOX hides anything
+    that has been filed under a label and archived, which is most of a
+    tidy mailbox.
+    """
+    try:
+        status, lines = box.list()
+    except (imaplib.IMAP4.error, OSError):
+        return "INBOX"
+    if status != "OK":
+        return "INBOX"
+    for raw in lines or []:
+        text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+        m = re.match(r'\(([^)]*)\)\s+"[^"]*"\s+(.+)$', text.strip())
+        if not m or "\\All" not in m.group(1):
+            continue
+        name = m.group(2).strip()
+        return name if name.startswith('"') else f'"{name}"'
+    return "INBOX"
+
+
 def mail_probe():
     """Check the Gmail connection and report, without scoring anything.
 
@@ -624,14 +648,14 @@ def mail_probe():
         print(f"Login:              FAILED ({e})")
         print(f"\nResult: Gmail refused the login. {shape}.")
         return False
-    mailbox = '"[Gmail]/All Mail"'
+    mailbox = _all_mail_box(box)
     if box.select(mailbox, readonly=True)[0] != "OK":
-        print(f'Mailbox:            "[Gmail]/All Mail" not found, falling back to INBOX')
+        print(f"Mailbox:            {mailbox} could not be opened, falling back to INBOX")
         print("                    (IMAP may be off: Gmail settings -> Forwarding and POP/IMAP)")
         mailbox = "INBOX"
         box.select(mailbox, readonly=True)
-    else:
-        print(f"Mailbox:            {mailbox}")
+    print(f"Mailbox:            {mailbox}"
+          + ("  <- only the inbox, so archived mail is not searched" if mailbox == "INBOX" else ""))
     since_day = dt.date.today() - dt.timedelta(days=cfg["lookback_days"])
     since = f"{since_day.day:02d}-{MONTHS[since_day.month - 1]}-{since_day.year}"
     print(f"Looking back to:    {since_day} ({cfg['lookback_days']} days)")
@@ -713,8 +737,11 @@ def newsletter_job_links():
     try:
         box = imaplib.IMAP4_SSL("imap.gmail.com", timeout=IMAP_TIMEOUT)
         box.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
-        if box.select('"[Gmail]/All Mail"', readonly=True)[0] != "OK":
-            box.select("INBOX", readonly=True)    # non-English Gmail: All Mail is named differently
+        mailbox = _all_mail_box(box)
+        if box.select(mailbox, readonly=True)[0] != "OK":
+            mailbox = "INBOX"
+            box.select(mailbox, readonly=True)
+        print(f"  [Newsletter] Reading {mailbox}")
         for src in senders:
             addr, name = src.get("from", ""), src.get("name") or src.get("from", "email")
             if not addr:

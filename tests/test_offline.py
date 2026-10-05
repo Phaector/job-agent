@@ -257,6 +257,10 @@ class FakeIMAP:
     def login(self, *a):
         return "OK", []
 
+    def list(self):
+        return "OK", [b'(\\HasNoChildren) "/" "INBOX"',
+                      b'(\\All \\HasNoChildren) "/" "[Gmail]/All Mail"']
+
     def select(self, mailbox, readonly=False):
         return ("OK", []) if "All Mail" in mailbox else ("NO", [])
 
@@ -274,6 +278,20 @@ class FakeIMAP:
         return "OK", []
 
 
+class _ListBox:
+    def __init__(self, lines): self.lines = lines
+
+    def list(self):
+        return "OK", self.lines
+
+
+check(sources._all_mail_box(_ListBox([b'(\\HasNoChildren) "/" "INBOX"',
+                                      b'(\\All \\HasNoChildren) "/" "[Gmail]/All Mail"']))
+      == '"[Gmail]/All Mail"', "All Mail is found in English")
+check(sources._all_mail_box(_ListBox([b'(\\All \\HasNoChildren) "/" "[Gmail]/Alle berichten"']))
+      == '"[Gmail]/Alle berichten"', "All Mail is found in Dutch, by its flag")
+check(sources._all_mail_box(_ListBox([b'(\\HasNoChildren) "/" "INBOX"'])) == "INBOX",
+      "an account without All Mail falls back to the inbox")
 check(sources.tidy_link("https://www.linkedin.com/comm/jobs/view/4123456789/?trackingId=xY%3D")
       == "https://www.linkedin.com/jobs/view/4123456789/", "LinkedIn tracking link tidied")
 check(sources.tidy_link("https://job-boards.greenhouse.io/moncler/jobs/123")
