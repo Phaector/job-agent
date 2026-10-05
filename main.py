@@ -174,6 +174,37 @@ def search_and_score(rows, profile, taste, seen):
 
 
 # ─── Choosing what goes into Notion ──────────────────────────────────────────
+def _in_europe(entry) -> bool:
+    item = entry["item"]
+    where = item.get("loc_option") if entry["kind"] == "new" else item.get("location")
+    return where in filters.EUROPE
+
+
+def keep_room_for_europe(main_pool, limit, floor):
+    """Top N by score, except that European rows get a guaranteed share.
+
+    Every taste seed is a US company, so taste_match quietly favours US roles
+    and Belgium loses the top of the list on score alone. This swaps out the
+    weakest US picks for the strongest European ones, but only as far as there
+    are European candidates to use, and never below their own score floor.
+    """
+    chosen = main_pool[:limit]
+    if not floor:
+        return chosen
+    europe = [p for p in main_pool if _in_europe(p)]
+    missing = min(floor, len(europe)) - sum(1 for p in chosen if _in_europe(p))
+    if missing <= 0:
+        return chosen
+    picked = {id(p) for p in chosen}
+    promote = [p for p in europe if id(p) not in picked][:missing]
+    droppable = sorted([p for p in chosen if not _in_europe(p)], key=lambda p: p["score"])
+    dropped = {id(p) for p in droppable[:len(promote)]}
+    kept = [p for p in chosen if id(p) not in dropped] + promote
+    if promote:
+        print(f"[Select] Kept {len(promote)} place(s) for Europe over higher-scoring US rows")
+    return sorted(kept, key=lambda p: -p["score"])
+
+
 def select_and_push(db, rows, scored):
     """Top N (+ wildcards) become Suggested, the rest of the good ones go to Queue.
     Queue rows from earlier days compete too and can be promoted."""
@@ -189,7 +220,9 @@ def select_and_push(db, rows, scored):
     main_pool = sorted([p for p in pool if not p["wild"]], key=lambda p: -p["score"])
     wild_pool = sorted([p for p in pool if p["wild"] and p["score"] >= LIM["min_score_wildcard"]],
                        key=lambda p: -p["score"])
-    chosen = main_pool[:LIM["suggested_per_run"]] + wild_pool[:LIM["wildcards_per_run"]]
+    chosen = keep_room_for_europe(main_pool, LIM["suggested_per_run"],
+                                  LIM.get("min_europe_per_run", 0))
+    chosen += wild_pool[:LIM["wildcards_per_run"]]
     chosen_ids = {id(p) for p in chosen}
 
     added = promoted = queued = 0

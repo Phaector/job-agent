@@ -463,5 +463,36 @@ check("failed" in _written and "Job Title" not in _written["failed"],
 check("empty" not in _written and any(writer.FAIL_MARKER in str(b) for b in _appended.get("empty", [])),
       "an unreadable link with nothing pasted gets the note")
 
+# ── Belgium keeps a share of the Suggested list ──
+def _entry(score, loc, kind="new"):
+    item = {"loc_option": loc} if kind == "new" else {"location": loc, "id": f"q{score}"}
+    return {"score": score, "wild": False, "kind": kind, "item": item}
+
+
+# Ten US rows all scoring above four Belgian ones: without a floor Belgium never appears.
+_us = [_entry(9.5 - i * 0.1, "New York") for i in range(10)]
+_be = [_entry(7.0 - i * 0.1, "Ghent") for i in range(4)]
+_pool = sorted(_us + _be, key=lambda p: -p["score"])
+_no_floor = main.keep_room_for_europe(_pool, 10, 0)
+check(sum(1 for p in _no_floor if main._in_europe(p)) == 0, "without a floor, Belgium is crowded out")
+_with_floor = main.keep_room_for_europe(_pool, 10, 4)
+check(len(_with_floor) == 10, "the Suggested list stays the same size")
+check(sum(1 for p in _with_floor if main._in_europe(p)) == 4, "four European rows are kept")
+_kept_us = sorted(p["score"] for p in _with_floor if not main._in_europe(p))
+check(_kept_us[0] > 8.9, "the US rows dropped are the weakest ones, not the best")
+check(main.keep_room_for_europe(_pool, 10, 4)[0]["score"] == 9.5, "the top row is still the top row")
+
+# Only two European candidates: take both, do not invent any.
+_thin = sorted(_us + _be[:2], key=lambda p: -p["score"])
+check(sum(1 for p in main.keep_room_for_europe(_thin, 10, 4) if main._in_europe(p)) == 2,
+      "a thin European pool is not padded")
+# Already enough Europe: nothing is swapped.
+_euro_heavy = sorted([_entry(9.0 - i * 0.1, "Brussels") for i in range(6)] + _us[:4],
+                     key=lambda p: -p["score"])
+check(main.keep_room_for_europe(_euro_heavy, 10, 4) == _euro_heavy[:10],
+      "an already European list is left alone")
+check(main._in_europe(_entry(8.0, "Ghent", "queue")), "a Queue row's location counts too")
+check(not main._in_europe(_entry(8.0, "New York")), "New York is not Europe")
+
 
 print(f"All {passed} offline checks passed.")

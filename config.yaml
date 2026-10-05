@@ -87,6 +87,9 @@ cover_letter:
 # ---------------------------------------------------------------------
 limits:
   suggested_per_run: 10          # best matches that become "Suggested" each morning
+  min_europe_per_run: 4          # of those, keep at least this many for Belgium and the EU
+                                 # when there are enough. Every taste seed is a US company,
+                                 # so without a floor the US crowds the top of the list out.
   wildcards_per_run: 3           # extra "Wildcard" roles outside your directions
   min_score_queue: 6.0           # minimum score to land in Notion at all
   min_score_wildcard: 7.0
@@ -111,15 +114,39 @@ weights:                         # must add up to 1.0
 # ---------------------------------------------------------------------
 # LOCATIONS: select option name -> words that identify it.
 # Order matters: specific cities before "Belgium – other".
+# Belgian postings often carry a province or region rather than a town
+# ("Oost-Vlaanderen", "Vlaams-Brabant"), and anything unlisted here is
+# dropped before scoring, so the catch-all list below is deliberately wide.
 # ---------------------------------------------------------------------
 locations:
   main:
     New York: [new york, nyc, manhattan, brooklyn, queens, long island city, jersey city, hoboken]
     Antwerp: [antwerp, antwerpen, anvers]
-    Brussels: [brussels, brussel, bruxelles, zaventem, diegem, machelen, vilvoorde]
-    Ghent: [ghent, gent, gand]
-    Leuven: [leuven, louvain]
-    "Belgium – other": [belgium, belgië, belgie, belgique, mechelen, hasselt, bruges, brugge, kortrijk, aalst, lochristi, schellebelle, oudenaarde, sint-niklaas, liège, liege, namur, charleroi, wavre, mons, genk, roeselare]
+    Brussels: [brussels, brussel, bruxelles, zaventem, diegem, machelen, vilvoorde,
+               anderlecht, schaerbeek, schaarbeek, ixelles, elsene, uccle, ukkel, etterbeek,
+               evere, jette, laeken, laken, woluwe, auderghem, oudergem, forest, vorst,
+               groot-bijgaarden, zellik, asse, ternat, dilbeek, grimbergen, wemmel,
+               sint-pieters-leeuw, halle, overijse, tervuren, wavre, waterloo, braine]
+    Ghent: [ghent, gent, gand, zwijnaarde, merelbeke, destelbergen, sint-denijs-westrem,
+            evergem, lochristi, melle, gentbrugge, ledeberg, drongen, mariakerke]
+    Leuven: [leuven, louvain, heverlee, haasrode, kessel-lo, wilsele, herent, bierbeek]
+    "Belgium – other":
+      # provinces and regions, in both languages
+      [belgium, belgië, belgie, belgique, vlaanderen, flanders, flandre,
+       wallonia, wallonie, wallonië, oost-vlaanderen, oost vlaanderen, east flanders,
+       west-vlaanderen, west vlaanderen, west flanders, flandre occidentale, flandre orientale,
+       vlaams-brabant, vlaams brabant, flemish brabant, brabant wallon, waals-brabant,
+       limburg, hainaut, henegouwen, liège, liege, luik, namur, namen, brabant,
+       # towns and smaller cities
+       mechelen, malines, hasselt, bruges, brugge, kortrijk, courtrai, aalst, alost,
+       schellebelle, oudenaarde, audenarde, sint-niklaas, saint-nicolas, charleroi, mons,
+       bergen, genk, roeselare, roulers, deinze, waregem, izegem, tielt, dendermonde,
+       termonde, lier, lierre, turnhout, mol, herentals, geel, kontich, wommelgem,
+       edegem, mortsel, boom, puurs, willebroek, beveren, lokeren, eeklo, zele, wetteren,
+       ninove, geraardsbergen, ronse, zottegem, aalter, tienen, diest, aarschot,
+       sint-truiden, tongeren, beringen, lommel, mouscron, moeskroen, tournai, doornik,
+       verviers, eupen, arlon, aarlen, ieper, ypres, veurne, diksmuide, torhout, knokke,
+       ostend, oostende, blankenberge, menen, harelbeke, wevelgem, zedelgem, jabbeke]
   stretch:
     Paris: [paris, île-de-france, ile-de-france]
     Amsterdam: [amsterdam]
@@ -248,6 +275,16 @@ search:
           - communicatie medewerker mode
           - persverantwoordelijke
           - public relations junior
+          - pr coördinator
+          - communicatie coördinator
+          - marketing coördinator mode
+          - junior brand manager
+          - junior marketeer
+          - account coordinator
+          - e-commerce coördinator
+          - evenementen coördinator
+          - junior aankoper
+          - starter marketing communicatie
       fr:
         where: Paris
         terms:
@@ -278,6 +315,10 @@ search:
       - {q: "public relations assistant fashion brand", location: "New York, New York, United States", gl: us}
       - {q: "communications coordinator luxury brand", location: "New York, New York, United States", gl: us}
       - {q: "junior public relations fashion", location: "Belgium", gl: be}
+      - {q: "junior marketing communicatie mode", location: "Belgium", gl: be}
+      - {q: "fashion brand junior Antwerpen", location: "Belgium", gl: be}
+      - {q: "communicatie coördinator merk", location: "Belgium", gl: be}
+      - {q: "management trainee België starter", location: "Belgium", gl: be}
 
 # ---------------------------------------------------------------------
 # WATCHLIST: company job boards read straight from their public feeds.
