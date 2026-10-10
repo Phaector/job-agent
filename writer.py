@@ -388,11 +388,23 @@ def cover_letters(db, rows, profile, only_page=None):
         system = LETTER_SYSTEM.format(
             profile=profile,
             her_notes=notes or "(she has not written anything herself for this role)")
-        out = scoring.parse_json(scoring.ask(settings.MODEL_DEEP, system, user, 2000))
+        # A letter plus its three lists is long, and a reply cut off mid-JSON
+        # parses as nothing. One retry costs a few seconds and saves her
+        # having to tick the row again.
+        out, raw = None, ""
+        for attempt in (1, 2):
+            raw = scoring.ask(settings.MODEL_DEEP, system, user, 3000)
+            out = scoring.parse_json(raw)
+            if isinstance(out, dict) and out.get("letter"):
+                break
+            print(f"  [Letter] attempt {attempt} for {company} came back unusable "
+                  f"({len(raw)} characters)")
         if not isinstance(out, dict) or not out.get("letter"):
-            sources.annotate("warning", f"No letter for {company}: the model did not return one. "
+            sources.annotate("warning", f"No letter for {company}: the model did not return one "
+                                        f"after two tries (last reply {len(raw)} characters). "
                                         f"Posting {len(posting)} characters, "
-                                        f"{'notes found' if notes else 'no notes'}.")
+                                        f"{'notes found' if notes else 'no notes'}. "
+                                        f"The row is still ticked, so the next run retries it.")
             print(f"  could not draft a letter for {company}")
             continue
 
