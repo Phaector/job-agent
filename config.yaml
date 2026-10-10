@@ -91,6 +91,20 @@ cover_letter:
     max_css_bytes: 400000
 
 # ---------------------------------------------------------------------
+# COMPANY LOOKUP: rows arrive with no Website, and without one a letter has
+# no brand to read and the row says nothing about who the company is. The
+# light run fills both in, a few at a time. The site is looked for in the
+# posting text, then Clearbit's free company directory, then a Google search
+# through SerpApi if a key is set, and only then by trying the obvious
+# domain and checking the page really is theirs.
+# ---------------------------------------------------------------------
+company_lookup:
+  enabled: true
+  max_per_run: 8                 # light runs every 2 hours, so this adds up quickly
+  describe: true                 # also write 2 or 3 lines on what they do
+  skip_statuses: [Not interested, Archived, Rejected]
+
+# ---------------------------------------------------------------------
 # QUIET APPLICATIONS: a row you applied to, untouched for this long, with
 # no email from the company in that time, is moved to Archived. Silence is
 # only read as silence when the mailbox was actually read: if Gmail cannot

@@ -383,6 +383,7 @@ def main():
         return
 
     writer.enrich_manual_rows(db, rows, profile, taste)
+    writer.fill_company_websites(db, rows)
     writer.cover_letters(db, rows, profile)
     writer.archive_quiet_applications(db, rows)
     if args.mode == "light":

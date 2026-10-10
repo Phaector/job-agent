@@ -107,6 +107,84 @@ def enrich_manual_rows(db, rows, profile, taste):
     return done
 
 
+# ─── Filling in who the company is ───────────────────────────────────────────
+ABOUT_MARKER = "About this company"
+ABOUT_SYSTEM = """You write one short paragraph saying what a company does, for someone \
+deciding whether to apply there.
+
+From the text of their own website, write 2 or 3 sentences covering: what they make or do, \
+who their customers are, and anything about their size, age or market that a candidate would \
+want to know. Then, on a new line starting with "Signals: ", give at most three short notes \
+that bear on working there, such as a house that is part of a larger group, a very small team, \
+a chain of shops, or a recent funding round. Leave the Signals line out entirely if the text \
+does not support any.
+
+Use only what the text says. No marketing language, no adjectives the company uses about \
+itself, nothing invented. If the text is too thin to tell, reply exactly: UNCLEAR"""
+
+
+def company_blurb(company: str, site: str) -> str:
+    """Two or three sentences on what a company does, from their own site."""
+    if not settings.ANTHROPIC_API_KEY or not site:
+        return ""
+    r = sources.http_get(site, retries=1, timeout=15)
+    if r is None or not getattr(r, "text", ""):
+        return ""
+    text = sources.html_to_text(r.text)[:6000]
+    if len(text) < 200:
+        return ""
+    out = scoring.ask(settings.MODEL_SCREEN, ABOUT_SYSTEM,
+                      f"COMPANY: {company}\nWEBSITE: {site}\n\nTHEIR SITE:\n{text}", 400)
+    out = (out or "").strip()
+    return "" if out.upper().startswith("UNCLEAR") else out
+
+
+def fill_company_websites(db, rows, limit=None):
+    """Find each company's site, note what they do, and save both to the row.
+
+    Without a website the letter has no brand to read, and a row says nothing
+    about who the company actually is. Both are filled here, once per company,
+    in the light run.
+    """
+    cfg = CONFIG.get("company_lookup") or {}
+    if not cfg.get("enabled", True):
+        return 0
+    limit = limit or int(cfg.get("max_per_run", 8))
+    skip_status = set(cfg.get("skip_statuses") or [])
+    todo = [r for r in rows
+            if not (r.get("website") or "").strip()
+            and (r.get("company") or "").strip()
+            and r.get("status") not in skip_status][:limit]
+    if not todo:
+        return 0
+
+    print(f"[Company] Looking up {len(todo)} website(s)")
+    done = 0
+    for row in todo:
+        company = row["company"]
+        site = branding.find_website(company, row.get("url") or "",
+                                     location=row.get("location") or "")
+        if not site:
+            print(f"    {company}: no site found")
+            continue
+        db.update_properties(row["id"], {"Website": {"url": site}})
+        done += 1
+        blurb = company_blurb(company, site) if cfg.get("describe", True) else ""
+        if blurb and ABOUT_MARKER not in db.page_text(row["id"]):
+            blocks = [heading(f"🏷 {ABOUT_MARKER}", 3)]
+            for part in blurb.split("\n"):
+                part = part.strip()
+                if part.lower().startswith("signals:"):
+                    blocks += [bullet(s.strip()) for s in part[8:].split(";") if s.strip()]
+                elif part:
+                    blocks.append(paragraph(part))
+            db.append_blocks(row["id"], blocks)
+        print(f"    {company}: {site}{' (described)' if blurb else ''}")
+    if done:
+        sources.annotate("notice", f"Filled in {done} company website(s) of {len(todo)} tried")
+    return done
+
+
 # ─── Applications that went quiet ────────────────────────────────────────────
 def _domain_of(row) -> str:
     for field in ("website", "url"):

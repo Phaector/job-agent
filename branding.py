@@ -11,6 +11,7 @@ letter still goes out looking deliberate.
 import re
 import colorsys
 
+import settings
 import sources
 from settings import CONFIG
 
@@ -67,28 +68,94 @@ def _plausible_site(url: str, company: str) -> bool:
     return root in stem or stem in root or stem[:8] == root[:8]
 
 
-def find_website(company: str, posting_url: str = "", description: str = "",
-                 page_html: str = "") -> str:
-    """The company's own site, dug out of the posting when the row has none."""
-    if not company:
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def _tld_preference(location: str):
+    """Belgian rows should land on the .be site, New York ones on the .com."""
+    if location in ("Antwerp", "Brussels", "Ghent", "Leuven", "Belgium – other"):
+        return (".be", ".eu", ".com")
+    if location == "Paris":
+        return (".fr", ".com")
+    if location == "Amsterdam":
+        return (".nl", ".com")
+    return (".com", ".co", ".be")
+
+
+def _from_clearbit(company: str, prefer):
+    """Clearbit's company autocomplete: free, no key, name in, domain out."""
+    r = sources.http_get("https://autocomplete.clearbit.com/v1/companies/suggest",
+                         params={"query": company}, retries=0, timeout=10)
+    try:
+        items = r.json() if r is not None else []
+    except ValueError:
         return ""
+    if not isinstance(items, list) or not items:
+        return ""
+    target = _norm(company)
+    exact = [i for i in items if _norm(i.get("name")) == target]
+    partial = [i for i in items
+               if target.startswith(_norm(i.get("name"))) or _norm(i.get("name")).startswith(target)]
+    for group in (exact, partial):
+        for tld in prefer:
+            for item in group:
+                if (item.get("domain") or "").endswith(tld):
+                    return f"https://{item['domain']}"
+        if group and group[0].get("domain"):
+            return f"https://{group[0]['domain']}"
+    return ""
+
+
+def _from_search(company: str):
+    """A plain Google search through SerpApi, when there is a key to spend."""
+    if not settings.SERPAPI_KEY:
+        return ""
+    data = sources.get_json("https://serpapi.com/search.json", {
+        "engine": "google", "q": f"{company} official website", "num": 5,
+        "api_key": settings.SERPAPI_KEY})
+    for result in (data or {}).get("organic_results", []) or []:
+        link = result.get("link") or ""
+        if _plausible_site(link, company):
+            m = re.match(r"https?://[^/]+", link)
+            return m.group(0) if m else ""
+    return ""
+
+
+def find_website(company: str, posting_url: str = "", description: str = "",
+                 page_html: str = "", location: str = "") -> str:
+    """The company's own site. Cheapest sources first, paid search last."""
+    if not company or len(_norm(company)) < 3:
+        return ""
+    prefer = _tld_preference(location)
+
     for candidate in re.findall(r"https?://[^\s\"'<>)\]]+", f"{description} {page_html}"):
         candidate = candidate.rstrip(".,);")
         if _plausible_site(candidate, company):
             m = re.match(r"https?://[^/]+", candidate)
-            return m.group(0) if m else ""
-    # Nothing in the text, so try the obvious domains and confirm the page
-    # actually belongs to them rather than a parked or squatted name.
-    stem = re.sub(r"[^a-z0-9]", "", (company or "").lower())[:30]
+            if m:
+                return m.group(0)
+
+    for lookup in (_from_clearbit, _from_search):
+        try:
+            found = lookup(company, prefer) if lookup is _from_clearbit else lookup(company)
+        except Exception as e:                  # a lookup must never stop a run
+            print(f"  [Website] {lookup.__name__} failed for {company}: {e}")
+            continue
+        if found and _plausible_site(found, company):
+            return found
+        if found:                               # a search result we cannot vouch for
+            print(f"  [Website] ignoring {found} for {company}: name does not match")
+
+    stem = _norm(company)[:30]
     if len(stem) < 4:
         return ""
-    for tld in (".com", ".be", ".eu", ".fr", ".nl"):
+    for tld in prefer:
         url = f"https://{stem}{tld}"
         r = sources.http_get(url, retries=0, timeout=10)
         if r is None or not getattr(r, "text", ""):
             continue
-        head = r.text[:4000].lower()
-        if stem[:6] in re.sub(r"[^a-z0-9]", "", head):
+        if stem[:6] in _norm(r.text[:4000]):
             return url
     return ""
 

@@ -676,4 +676,86 @@ check(writer.archive_quiet_applications(_ArchiveDB(), _rows) == 0, "switched off
 check(sources.mail_replies_since([], dt.date.today()) == set(), "no candidates means no mail check")
 
 
+# ── Looking the company up ──
+check(branding._tld_preference("Ghent")[0] == ".be", "a Belgian row prefers the .be site")
+check(branding._tld_preference("New York")[0] == ".com", "a New York row prefers the .com")
+check(branding._tld_preference("Paris")[0] == ".fr", "a Paris row prefers the .fr")
+
+
+class _Suggest:
+    """Stands in for Clearbit's company autocomplete."""
+    def __init__(self, items): self.items = items
+    def json(self): return self.items
+
+
+_real_get = sources.http_get
+sources.http_get = lambda *a, **k: _Suggest([
+    {"name": "Les Jumelles", "domain": "lesjumelles.ie"},
+    {"name": "Les Jumelles", "domain": "lesjumelles.be"},
+    {"name": "Les Jumelles Boutique", "domain": "lesjumellesboutique-shop.com"}])
+try:
+    check(branding._from_clearbit("Les Jumelles", (".be", ".eu", ".com")) == "https://lesjumelles.be",
+          "the Belgian domain is chosen from several same-named matches")
+    check(branding._from_clearbit("Les Jumelles", (".com",)) == "https://lesjumelles.ie",
+          "with no preferred match it still returns an exact name match")
+    sources.http_get = lambda *a, **k: _Suggest([])
+    check(branding._from_clearbit("Nowhere Ltd", (".com",)) == "", "no suggestions means no site")
+finally:
+    sources.http_get = _real_get
+
+check(branding.find_website("Lucien Pagès Communication", "",
+                            "Apply at https://www.lucienpages.com/careers")
+      == "https://www.lucienpages.com", "a site in the posting text wins before any lookup")
+check(branding.find_website("X", "") == "", "too short a name is not looked up")
+
+
+class _LookupDB:
+    def __init__(self, text=""):
+        self.props, self.blocks, self.text = {}, [], text
+
+    def update_properties(self, page_id, props):
+        self.props[page_id] = props
+        return True
+
+    def page_text(self, page_id):
+        return self.text
+
+    def append_blocks(self, page_id, blocks):
+        self.blocks.append(page_id)
+        return True
+
+
+_lookup_rows = [
+    {"id": "a", "company": "Christian Wijnants", "website": "", "status": "Suggested",
+     "location": "Antwerp", "url": ""},
+    {"id": "b", "company": "Already Known", "website": "https://known.com",
+     "status": "Suggested", "location": "New York", "url": ""},
+    {"id": "c", "company": "Dead Lead", "website": "", "status": "Not interested",
+     "location": "New York", "url": ""},
+    {"id": "d", "company": "", "website": "", "status": "Suggested", "location": "", "url": ""},
+]
+_real_find, _real_blurb = branding.find_website, writer.company_blurb
+branding.find_website = lambda c, u="", d="", h="", location="": f"https://{c.split()[0].lower()}.be"
+writer.company_blurb = lambda company, site: "They design womenswear in Antwerp.\nSignals: small team; independent house"
+try:
+    _ldb = _LookupDB()
+    _n = writer.fill_company_websites(_ldb, _lookup_rows)
+    check(_n == 1, f"only the row missing a website is looked up ({_n})")
+    check("a" in _ldb.props and "b" not in _ldb.props, "a row that already has one is left alone")
+    check("c" not in _ldb.props, "a Not interested row is skipped")
+    check("d" not in _ldb.props, "a row with no company name is skipped")
+    check(_ldb.props["a"]["Website"]["url"] == "https://christian.be", "the site is written to the row")
+    check(_ldb.blocks == ["a"], "and a short note on what they do is added")
+
+    _ldb2 = _LookupDB(text="🏷 About this company\nalready described")
+    writer.fill_company_websites(_ldb2, _lookup_rows)
+    check(_ldb2.blocks == [], "a company already described is not described twice")
+
+    writer.CONFIG["company_lookup"] = dict(writer.CONFIG["company_lookup"], enabled=False)
+    check(writer.fill_company_websites(_LookupDB(), _lookup_rows) == 0, "it can be switched off")
+finally:
+    branding.find_website, writer.company_blurb = _real_find, _real_blurb
+    writer.CONFIG["company_lookup"] = dict(writer.CONFIG["company_lookup"], enabled=True)
+
+
 print(f"All {passed} offline checks passed.")
