@@ -46,16 +46,47 @@ def ask(model: str, system: str, user: str, max_tokens: int = 1500) -> str:
     return ""
 
 
+def _escape_loose_newlines(raw: str) -> str:
+    """Escape the line breaks a model leaves raw inside a JSON string.
+
+    A cover letter is several paragraphs, and a real newline inside a string
+    is invalid JSON, so one stray line break would otherwise throw the whole
+    letter away. Everything outside strings is untouched.
+    """
+    out, in_string, escaped = [], False, False
+    for ch in raw:
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == "\\" and in_string:
+            out.append(ch)
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string and ch in "\n\r\t":
+            out.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}[ch])
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def parse_json(text: str, expect: str = "object"):
     t = re.sub(r"```(?:json)?", "", text or "").strip()
     opener, closer = ("[", "]") if expect == "array" else ("{", "}")
     start, end = t.find(opener), t.rfind(closer)
     if start == -1 or end == -1:
         return None
-    try:
-        return json.loads(t[start:end + 1])
-    except json.JSONDecodeError:
-        return None
+    body = t[start:end + 1]
+    for candidate in (body, _escape_loose_newlines(body)):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 # ─── Taste ────────────────────────────────────────────────────────────────────

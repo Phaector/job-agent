@@ -400,11 +400,13 @@ def cover_letters(db, rows, profile, only_page=None):
             print(f"  [Letter] attempt {attempt} for {company} came back unusable "
                   f"({len(raw)} characters)")
         if not isinstance(out, dict) or not out.get("letter"):
+            opening = " ".join((raw or "").split())[:240]
             sources.annotate("warning", f"No letter for {company}: the model did not return one "
                                         f"after two tries (last reply {len(raw)} characters). "
                                         f"Posting {len(posting)} characters, "
                                         f"{'notes found' if notes else 'no notes'}. "
-                                        f"The row is still ticked, so the next run retries it.")
+                                        f"It began: {opening or '(nothing at all)'} "
+                                        f"— the row is still ticked, so the next run retries it.")
             print(f"  could not draft a letter for {company}")
             continue
 

@@ -348,6 +348,18 @@ check(fake_db("rich_text").build_properties(scored_job, status="Suggested").get(
       "a Status of the wrong type is left alone")
 
 
+# ── A letter whose JSON a model broke is repaired, not thrown away ──
+check(scoring.parse_json('{"letter": "one"}') == {"letter": "one"}, "ordinary JSON still parses")
+_loose = '{"letter": "Dear team,\n\nSecond paragraph.", "cv_emphasis": ["a"]}'
+_fixed = scoring.parse_json(_loose)
+check(isinstance(_fixed, dict) and _fixed["letter"].count("\n") == 2,
+      "raw line breaks inside the letter are repaired, keeping the paragraphs")
+check(scoring.parse_json('{"a": "he said \\"hi\\" to me"}') == {"a": 'he said "hi" to me'},
+      "an escaped quote inside a string is left alone")
+check(scoring.parse_json("not json at all") is None, "and real rubbish is still refused")
+check(scoring.parse_json('```json\n{"letter": "x"}\n```') == {"letter": "x"},
+      "a fenced reply is unwrapped")
+
 # ── Cover letters: her own notes, branding, PDF ──
 import branding          # noqa: E402
 import letter_pdf        # noqa: E402
