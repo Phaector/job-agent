@@ -147,6 +147,9 @@ def archive_quiet_applications(db, rows, dry_run=False):
         if edited < cutoff:
             stale.append(row)
     if not stale:
+        if dry_run:
+            sources.annotate("notice", "Preview only: no application has been untouched "
+                                       f"for {days}+ days, so nothing would be archived.")
         return 0
 
     since_day = (cutoff - dt.timedelta(days=2)).date()      # a little slack around the window
@@ -156,6 +159,12 @@ def archive_quiet_applications(db, rows, dry_run=False):
     quiet = [r for r in stale if r["id"] not in replied]
     print(f"[Quiet] {len(stale)} application(s) untouched for {days}+ days, "
           f"{len(stale) - len(quiet)} had a reply, {len(quiet)} to archive")
+    listed = "; ".join(f"{r.get('company') or '?'} ({r.get('title') or 'no title'})"
+                       for r in quiet[:12]) or "none"
+    if dry_run:
+        sources.annotate("notice", f"Preview only, nothing changed. {len(stale)} application(s) "
+                                   f"untouched for {days}+ days, {len(stale) - len(quiet)} had a "
+                                   f"reply. Would archive {len(quiet)}: {listed}")
     for row in quiet:
         label = f"{row.get('company')} · {row.get('title') or ''}".strip(" ·")
         if dry_run:
@@ -168,8 +177,7 @@ def archive_quiet_applications(db, rows, dry_run=False):
                 f"if that is wrong.")])
             print(f"    archived: {label}")
     if quiet and not dry_run:
-        sources.annotate("notice", f"Archived {len(quiet)} quiet application(s): "
-                                   + "; ".join((r.get('company') or '?') for r in quiet[:10]))
+        sources.annotate("notice", f"Archived {len(quiet)} quiet application(s): {listed}")
     return len(quiet)
 
 
