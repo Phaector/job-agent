@@ -15,7 +15,7 @@ on:
         description: "What to run"
         type: choice
         default: daily
-        options: [daily, light, letters, next, patterns, note, mailcheck]
+        options: [daily, light, letters, quiet, next, patterns, note, mailcheck]
       count:
         description: "Rows to move from Queue to Suggested (mode 'next')"
         default: "10"
@@ -25,6 +25,10 @@ on:
       page:
         description: "One Notion page id (mode 'letters'); blank means every ticked row"
         default: ""
+      dry_run:
+        description: "Print what would change without writing to Notion"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -80,7 +84,11 @@ jobs:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTE: ${{ inputs.note }}
-        run: python main.py --mode "${{ steps.mode.outputs.mode }}" --count "${{ inputs.count || '10' }}" --note "$NOTE" --page "${{ steps.mode.outputs.page }}"
+        run: |
+          python main.py --mode "${{ steps.mode.outputs.mode }}" \
+            --count "${{ inputs.count || '10' }}" --note "$NOTE" \
+            --page "${{ steps.mode.outputs.page }}" \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
 
       - name: Remember screened postings and newsletter emails
         if: steps.mode.outputs.mode == 'daily'
