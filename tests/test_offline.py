@@ -424,6 +424,50 @@ check(branding.classify_font("canela deck") is True, "a serif family is recognis
 check(branding.classify_font("söhne") is False, "a sans family is recognised")
 check(branding.brand_for("", "X")["accent"] == branding.NEUTRAL["accent"], "no website falls back")
 
+# ── When the CSS says nothing: the brand's own icon does ──
+check(branding._abs("/x.png", "https://a.be") == "https://a.be/x.png", "a root link is absolute")
+check(branding._abs("//cdn.a.be/x.png", "https://a.be") == "https://cdn.a.be/x.png",
+      "a protocol-relative link gets a scheme")
+check(branding._abs("https://b.be/x.png", "https://a.be") == "https://b.be/x.png",
+      "an absolute link is left as it is")
+_mask = '<link rel="mask-icon" href="/pin.svg" color="#E7792B">'
+check(branding._declared_icon_colour(_mask) == (231, 121, 43), "a mask icon states the colour outright")
+check(branding._declared_icon_colour('<link rel="mask-icon" href="/p.svg" color="#FFFFFF">') is None,
+      "a white mask icon is not a brand colour")
+_icons = ('<link rel="icon" sizes="32x32" href="/small.png">'
+          '<link rel="apple-touch-icon" sizes="180x180" href="/big.png">'
+          '<link rel="icon" href="/vector.svg">')
+_urls = branding._icon_urls(_icons, "https://a.be")
+check(_urls[0] == "https://a.be/big.png", "the apple touch icon is tried first")
+check("https://a.be/vector.svg" not in _urls, "an SVG icon is skipped, having no pixels to read")
+check(_urls[-1] == "https://a.be/favicon.ico", "and plain /favicon.ico is the last resort")
+
+try:
+    from PIL import Image
+    import io as _io
+
+    _img = Image.new("RGBA", (32, 32), (231, 121, 43, 255))
+    for _x in range(32):                      # a white stripe, which must not win
+        for _y in range(8):
+            _img.putpixel((_x, _y), (255, 255, 255, 255))
+    _buf = _io.BytesIO()
+    _img.save(_buf, format="PNG")
+
+    class _Icon:
+        status_code = 200
+        content = _buf.getvalue()
+
+    _real_get = sources.http_get
+    try:
+        sources.http_get = lambda url, **kw: _Icon()
+        check(branding._favicon_colour('<link rel="icon" href="/f.png">', "https://a.be")
+              == (224, 120, 40), "the favicon's own colour is read off its pixels")
+    finally:
+        sources.http_get = _real_get
+except ImportError:                           # Pillow missing must cost a colour, not a letter
+    check(branding._favicon_colour('<link rel="icon" href="/f.png">', "https://a.be") is None,
+          "without Pillow the favicon is simply skipped")
+
 _profile_contact = """### Contact
 Put based in Ghent if the listing is in Belgium, if the listing is in New York, put new York.
 Tel US: +1 (617) 251 8864

@@ -260,6 +260,100 @@ def mute(rgb, amount=0.45):
 
 
 # ─── Reading the page ─────────────────────────────────────────────────────────
+def _abs(url: str, base: str) -> str:
+    """A link from a page, as an absolute address."""
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/"):
+        return base.rstrip("/") + url
+    if not url.startswith("http"):
+        return base.rstrip("/") + "/" + url
+    return url
+
+
+def _declared_icon_colour(html: str):
+    """<link rel="mask-icon" color="#..."> — the brand colour, stated outright."""
+    for tag in re.findall(r"<link[^>]+mask-icon[^>]*>", html, re.I):
+        m = re.search(r'color=["\']([^"\']+)', tag)
+        if m:
+            rgb = parse_color(m.group(1))
+            if rgb and is_usable_accent(rgb):
+                return rgb
+    return None
+
+
+def _manifest_colour(html: str, base: str):
+    """theme_color from the web app manifest, which survives a JS-built site."""
+    m = re.search(r'<link[^>]+rel=["\']?manifest["\']?[^>]*>', html, re.I)
+    if not m:
+        return None
+    href = re.search(r'href=["\']([^"\']+)', m.group(0))
+    if not href:
+        return None
+    data = sources.get_json(_abs(href.group(1), base))
+    if not isinstance(data, dict):
+        return None
+    for key in ("theme_color", "background_color"):
+        rgb = parse_color(str(data.get(key) or ""))
+        if rgb and is_usable_accent(rgb):
+            return rgb
+    return None
+
+
+def _icon_urls(html: str, base: str):
+    """Icon links on the page, the largest and most colourful first."""
+    found = []
+    for tag in re.findall(r"<link[^>]+>", html, re.I):
+        if not re.search(r'rel=["\']?[^"\'>]*icon', tag, re.I):
+            continue
+        href = re.search(r'href=["\']([^"\']+)', tag)
+        if not href or href.group(1).lower().endswith(".svg"):
+            continue                       # an SVG needs a renderer; skip it
+        apple = 1 if "apple-touch" in tag.lower() else 0
+        size = re.search(r'sizes=["\']?(\d+)', tag)
+        found.append((apple, int(size.group(1)) if size else 0, _abs(href.group(1), base)))
+    found.sort(reverse=True)               # apple-touch first, then biggest
+    urls = [u for _a, _s, u in found]
+    urls.append(base.rstrip("/") + "/favicon.ico")
+    seen, out = set(), []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out[:3]
+
+
+def _favicon_colour(html: str, base: str):
+    """The brand's own mark is coloured in their colour; read it off the pixels."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    import io
+    for url in _icon_urls(html, base):
+        r = sources.http_get(url, retries=0, timeout=10)
+        if r is None or getattr(r, "status_code", 0) != 200 or not r.content:
+            continue
+        try:
+            img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+            img.thumbnail((64, 64))
+        except Exception:
+            continue
+        tally = {}
+        for px_r, px_g, px_b, alpha in img.getdata():
+            if alpha < 200:
+                continue
+            rgb = (px_r // 8 * 8, px_g // 8 * 8, px_b // 8 * 8)   # merge near-identical shades
+            if not is_usable_accent(rgb):
+                continue
+            tally[rgb] = tally.get(rgb, 0) + 1
+        if tally:
+            best = max(tally, key=tally.get)
+            if tally[best] >= 12:          # a handful of stray pixels is not a brand
+                return best
+    return None
+
+
 def _stylesheets(html: str, base: str, limit=3):
     """The first few same-origin stylesheets, as text."""
     out = []
@@ -332,7 +426,8 @@ def brand_for(website: str, company: str = "") -> dict:
         return dict(NEUTRAL, source=f"could not read {website}")
     html = r.text
     base = re.match(r"https?://[^/]+", website)
-    sheets = _stylesheets(html, base.group(0) if base else website)
+    base_url = base.group(0) if base else website
+    sheets = _stylesheets(html, base_url)
     css = "\n".join(sheets)
 
     scores = _colour_candidates(css)
@@ -345,16 +440,28 @@ def brand_for(website: str, company: str = "") -> dict:
         scores[rgb] = scores.get(rgb, 0) + weight
 
     accent = max(scores, key=lambda c: (scores[c], -hsl(c)[2])) if scores else None
+    how = f"colour from {website}"
+    if accent is None or scores[accent] < MIN_CONFIDENCE:
+        # Either nothing was found, or the best candidate was simply the most
+        # common colour rather than one the page declared as theirs — on a
+        # big, JS-built site that is usually a stray UI shade. These three say
+        # outright what the brand colour is, so they beat a guess from the CSS.
+        for found, told_by in ((_declared_icon_colour(html), "their mask icon"),
+                               (_manifest_colour(html, base_url), "their app manifest"),
+                               (_favicon_colour(html, base_url), "their favicon")):
+            if found:
+                accent, how = found, f"colour from {told_by} on {website}"
+                break
+        else:
+            guess = (f" (best guess {to_hex(accent)} scored {scores[accent]})"
+                     if accent is not None else "")
+            accent = None
+            how = f"no colour confidently theirs on {website}{guess}"
     if accent is None:
-        brand = dict(NEUTRAL, source=f"no brand colour found on {website}")
-    elif scores[accent] < MIN_CONFIDENCE:
-        # Nothing on the page declared this as theirs; it was simply the most
-        # common colour, and on a big site that is often a stray UI shade.
-        brand = dict(NEUTRAL, source=f"no colour confidently theirs on {website} "
-                                     f"(best guess {to_hex(accent)} scored {scores[accent]})")
+        brand = dict(NEUTRAL, source=how)
     else:
         brand = {"accent": to_hex(accent), "ink": to_hex(darken(accent, 0.62)),
-                 "muted": to_hex(mute(accent)), "source": f"colour from {website}"}
+                 "muted": to_hex(mute(accent)), "source": how}
 
     families = _font_candidates(css + "\n" + inline)
     brand["font_name"], brand["serif"] = "", False
