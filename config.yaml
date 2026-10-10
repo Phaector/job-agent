@@ -97,6 +97,15 @@ cover_letter:
     enabled: true                 # false means one plain house style for every letter
     fallback_accent: "#1F1F1F"    # used when a site gives us nothing
     max_css_bytes: 400000
+    # Houses whose colour is nowhere in their own page: Hermes, for one,
+    # publishes nothing readable — their CSS is creams and their favicon is
+    # black on white. Name one here and the agent stops guessing. `font` is
+    # optional and may be any Google font, or a family of theirs that happens
+    # to be one. Match is on the company name, lower case, ignoring accents.
+    known:
+      hermes:
+        accent: "#F37021"
+        font: Manrope
 
 # ---------------------------------------------------------------------
 # COMPANY LOOKUP: rows arrive with no Website, and without one a letter has

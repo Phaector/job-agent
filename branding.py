@@ -10,6 +10,7 @@ letter still goes out looking deliberate.
 """
 import re
 import colorsys
+import unicodedata
 
 import settings
 import sources
@@ -229,13 +230,14 @@ MIN_CONFIDENCE = 30
 
 
 def site_root(url: str) -> str:
-    """Just the scheme and host of a stored website.
+    """A stored website without the campaign tail a job ad pastes onto it.
 
-    A row's Website is often a deep or campaign-tagged link ("…/?gclid=…"),
-    and the brand's own colours and type live on the home page, not there.
+    The path is kept. Plenty of houses serve nothing at the bare domain and
+    put the real site under a locale ("hermes.com/us/en/", "x.be/nl/"), so
+    cutting back to the host lands on an empty redirect shell.
     """
-    m = re.match(r"(https?://[^/?#]+)", url or "")
-    return m.group(1) if m else (url or "")
+    m = re.match(r"(https?://[^?#]+)", url or "")
+    return m.group(1).rstrip("/") if m else (url or "")
 
 
 def is_usable_accent(rgb) -> bool:
@@ -416,9 +418,38 @@ def classify_font(name: str):
 
 
 # ─── The one function the rest of the agent calls ─────────────────────────────
+def _fold(text: str) -> str:
+    """Lower case with accents removed, so "Hermès" matches "hermes"."""
+    stripped = unicodedata.normalize("NFKD", text or "")
+    return "".join(c for c in stripped if not unicodedata.combining(c)).lower()
+
+
+def _known_brand(company: str):
+    """A colour you set by hand in config, for a house whose page hides it."""
+    key = re.sub(r"[^a-z0-9]", "", _fold(company or ""))
+    if not key:
+        return None
+    for name, spec in (CFG.get("known") or {}).items():
+        if re.sub(r"[^a-z0-9]", "", _fold(str(name))) != key:
+            continue
+        rgb = parse_color(str((spec or {}).get("accent") or ""))
+        if not rgb:
+            return None
+        brand = {"accent": to_hex(rgb), "ink": to_hex(darken(rgb, 0.62)),
+                 "muted": to_hex(mute(rgb)), "source": f"colour you set for {company}",
+                 "font_name": str(spec.get("font") or ""), "serif": bool(spec.get("serif"))}
+        return brand
+    return None
+
+
 def brand_for(website: str, company: str = "") -> dict:
     """Accent colour, ink, muted tone and serif-or-not for one company."""
-    if not CFG.get("enabled", True) or not website:
+    if not CFG.get("enabled", True):
+        return dict(NEUTRAL, source="branding switched off in config")
+    told = _known_brand(company)
+    if told:
+        return told
+    if not website:
         return dict(NEUTRAL, source="no website on the row")
     website = site_root(website)
     r = sources.http_get(website, retries=1)

@@ -122,6 +122,19 @@ LEGACY_UA = "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)"
 FONT_CACHE = ROOT / "state" / "fonts"
 
 
+def tidy_family(detected: str) -> str:
+    """The first family in a CSS stack, spelled as Google spells it.
+
+    "manrope", roboto  ->  Manrope.  Returns "" for anything that is not a
+    plain ASCII name, since a mangled "Söhne" would only waste a lookup.
+    """
+    first = (detected or "").split(",")[0].strip().strip("\"'").strip()
+    first = re.sub(r"\s+", " ", first)
+    if not first or not re.fullmatch(r"[A-Za-z0-9 ]{2,40}", first):
+        return ""
+    return " ".join(w.capitalize() if w.islower() else w for w in first.split())
+
+
 def closest_font(detected: str, serif: bool) -> str:
     low = (detected or "").lower()
     for token, family in CLOSEST_FONT.items():
@@ -166,9 +179,10 @@ def _download_font(family: str, bold: bool):
 def fonts_for(brand: dict) -> dict:
     """Body, bold and display faces, as close to the company's as licensing allows.
 
-    A file named in config wins. Otherwise the detected family is matched to
-    the nearest Google font and fetched. Anything that fails falls back to the
-    faces built into every PDF reader, so a letter always renders.
+    A file named in config wins. Otherwise the company's own family is tried
+    first, since plenty are open source, and the nearest lookalike after it.
+    Anything that fails falls back to the faces built into every PDF reader,
+    so a letter always renders.
     """
     serif = bool(brand.get("serif"))
     custom = _register_custom_fonts()
@@ -179,9 +193,18 @@ def fonts_for(brand: dict) -> dict:
               "named": ""}
     if custom.get("body") or not CFG.get("match_fonts", True):
         return picked
-    family = closest_font(brand.get("font_name", ""), serif)
+    # Her own typeface is often open source — Manrope, Inter, Lora and the
+    # rest are all on Google Fonts — so try the real family before settling
+    # for the nearest lookalike.
+    detected = brand.get("font_name", "")
+    wanted = [f for f in (tidy_family(detected), closest_font(detected, serif)) if f]
+    family, regular, strong = "", None, None
+    for candidate in dict.fromkeys(wanted):
+        regular = _download_font(candidate, False)
+        if regular:
+            family, strong = candidate, _download_font(candidate, True)
+            break
     try:
-        regular, strong = _download_font(family, False), _download_font(family, True)
         if not regular:
             return picked
         name = family.replace(" ", "")

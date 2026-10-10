@@ -435,6 +435,13 @@ check(branding._font_candidates(sample_css)[0] == "söhne", "the body family is 
 check(branding.classify_font("canela deck") is True, "a serif family is recognised")
 check(branding.classify_font("söhne") is False, "a sans family is recognised")
 check(branding.brand_for("", "X")["accent"] == branding.NEUTRAL["accent"], "no website falls back")
+check(branding._fold("Hermès") == "hermes", "accents are folded before matching a name")
+_told = branding._known_brand("Hermès")
+check(_told and _told["accent"] == "#F37021", "a colour set by hand in config is used as given")
+check(_told and _told["font_name"] == "Manrope", "and so is the typeface named with it")
+check(branding._known_brand("Nobody In Config") is None, "a company not listed is read from its site")
+check(branding.brand_for("", "Hermes")["accent"] == "#F37021",
+      "a house set by hand needs no website at all")
 
 # ── When the CSS says nothing: the brand's own icon does ──
 check(branding._abs("/x.png", "https://a.be") == "https://a.be/x.png", "a root link is absolute")
@@ -513,8 +520,9 @@ check(not branding.is_usable_accent((10, 102, 194)), "LinkedIn blue is not a bra
 check(branding.is_usable_accent((231, 121, 43)), "an orange still is")
 check(branding.site_root("https://www.hermes.com/?utm_source=google&gclid=abc")
       == "https://www.hermes.com", "a campaign tail is stripped off a stored website")
-check(branding.site_root("https://x.be/fr/careers") == "https://x.be",
-      "and a deep link comes back to the home page, where the brand lives")
+check(branding.site_root("https://www.hermes.com/us/en/?gclid=abc") == "https://www.hermes.com/us/en",
+      "but the locale path is kept: plenty of houses serve nothing at the bare domain")
+check(branding.site_root("https://x.be/nl/") == "https://x.be/nl", "a trailing slash is tidied")
 
 check(letter_pdf.closest_font("Didot HTF", True) == "Playfair Display", "Didot maps to Playfair")
 check(letter_pdf.closest_font("Söhne Buch", False) == "Inter", "Söhne maps to Inter")
@@ -524,6 +532,11 @@ check(letter_pdf.closest_font("", True) == "EB Garamond", "an unknown serif gets
 check(letter_pdf.closest_font("Unknowable Grotesk Neue", False) == "Space Grotesk",
       "an unknown family still matches on a word it contains")
 check(letter_pdf.closest_font("Nothing Familiar", False) == "Inter", "otherwise the sans default")
+check(letter_pdf.tidy_family('"manrope", roboto, sans-serif') == "Manrope",
+      "the first family in a CSS stack is the company's own")
+check(letter_pdf.tidy_family("EB Garamond") == "EB Garamond", "existing capitals are kept")
+check(letter_pdf.tidy_family("söhne") == "", "an accented name is not guessed at")
+check(letter_pdf.tidy_family("sans-serif") == "", "a generic keyword is not a family")
 
 _real_dl, _asked = letter_pdf._download_font, []
 
@@ -536,7 +549,10 @@ def _no_font(family, bold):
 try:
     letter_pdf._download_font = _no_font
     _f = letter_pdf.fonts_for({"serif": True, "font_name": "Bodoni Moda"})
-    check(_asked and _asked[0][0] == "Playfair Display", "the matched family is the one fetched")
+    check(_asked and _asked[0][0] == "Bodoni Moda",
+          "the company's own family is tried first, in case it is open source")
+    check("Playfair Display" in [a[0] for a in _asked],
+          "and the nearest lookalike is tried after it")
     check(_f["body"] == "Times-Roman" and _f["bold"] == "Times-Bold",
           "a failed download falls back to a built-in serif, never to no letter")
     check(_f["named"] == "", "and the letter does not claim a font it could not get")

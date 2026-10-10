@@ -419,10 +419,15 @@ def cover_letters(db, rows, profile, only_page=None):
         brand = branding.brand_for(site, company)
         sender = letter_pdf.sender_for(row.get("location") or "", profile)
         fonts = letter_pdf.fonts_for(brand)
-        set_in = (f"set in {fonts['named']}" if fonts.get("named")
-                  else "set in the default face")
-        if brand.get("font_name") and fonts.get("named"):
-            set_in += f" (closest to their {brand['font_name'].title()})"
+        got, theirs = fonts.get("named", ""), letter_pdf.tidy_family(brand.get("font_name", ""))
+        if not got:
+            set_in = "set in the default face"
+        elif theirs and got.lower() == theirs.lower():
+            set_in = f"set in their own {got}"
+        elif theirs:
+            set_in = f"set in {got}, the closest to their {theirs}"
+        else:
+            set_in = f"set in {got}"
         print(f"  [Letter] {company}: accent {brand['accent']}, "
               f"{'serif' if brand['serif'] else 'sans'} ({brand.get('source')}); "
               f"{set_in}; {sender['region'].upper()} contact details")
