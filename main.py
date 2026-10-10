@@ -113,15 +113,51 @@ def collect(rows):
         if job:
             jobs.append(job)
         time.sleep(0.5)
+    by_source = Counter(j.get("source", "?") for j in jobs)
+    be_by_source = Counter(j.get("source", "?") for j in jobs if _is_belgian(j.get("location")))
     print(f"[Collect] {len(jobs)} postings in total")
+    for name, n in by_source.most_common():
+        print(f"    {name}: {n} ({be_by_source.get(name, 0)} Belgian)")
+    sources.annotate("notice", "Collected " + "; ".join(
+        f"{name} {n}/{be_by_source.get(name, 0)} BE" for name, n in by_source.most_common()))
     return jobs
 
 
 # ─── Search → screen → score ─────────────────────────────────────────────────
+def _is_belgian(text: str) -> bool:
+    """A rough read of whether a posting's location is in Belgium.
+
+    Only used for the run's own bookkeeping, so that a run can say how many
+    Belgian postings it saw and where they were lost. The real decision is
+    filters.location_bucket.
+    """
+    option, _tier = filters.location_bucket(text or "")
+    return option in ("Antwerp", "Brussels", "Ghent", "Leuven", "Belgium – other")
+
+
+def _trace_belgium(raw, fresh, kept, scored):
+    """Where Belgian postings were lost, reported as a run annotation.
+
+    Run logs are served from a host this agent cannot reach, so without this
+    a run that finds nothing Belgian looks the same as a run that found
+    twenty and threw them all away.
+    """
+    at_source = sum(1 for j in raw if _is_belgian(j.get("location")))
+    passed = sum(1 for j in fresh if _is_belgian(j.get("location")))
+    screened = sum(1 for j in kept if _is_belgian(j.get("location")))
+    final = sum(1 for j in scored if j.get("loc_option") in filters.EUROPE)
+    line = (f"Belgium this run: {at_source} collected, {passed} past the free filters, "
+            f"{screened} past the screen, {final} scored (of {len(scored)} scored in total).")
+    print("[Belgium] " + line)
+    sources.annotate("notice" if final else "warning", line)
+    return at_source
+
+
 def search_and_score(rows, profile, taste, seen):
     raw = collect(rows)
     existing_urls = {filters.normalize_url(r["url"]) for r in rows if r.get("url")}
     stats, fresh = Counter(), []
+    dropped_be = Counter()
     for job in raw:
         nu = filters.normalize_url(job["url"])
         job["norm_url"] = nu
@@ -137,9 +173,15 @@ def search_and_score(rows, profile, taste, seen):
                 fresh.append(job)
             else:
                 stats[reason] += 1
+                if _is_belgian(job.get("location")):
+                    dropped_be[reason] += 1
     fresh = filters.dedupe_batch(fresh)
     print("[Filter] " + ", ".join(f"{k}: {v}" for k, v in stats.most_common()))
     print(f"[Filter] {len(fresh)} new postings passed the free filters")
+    if dropped_be:
+        why = ", ".join(f"{k}: {v}" for k, v in dropped_be.most_common())
+        print(f"[Filter] Belgian postings dropped for: {why}")
+        sources.annotate("warning", f"Belgian postings dropped at the free filters: {why}")
 
     kept = scoring.screen(fresh, profile, taste)
     print(f"[Screen] {len(kept)} kept for a full score")
@@ -170,6 +212,7 @@ def search_and_score(rows, profile, taste, seen):
         seen[job["norm_url"]]["s"] = job["total"]
         scored.append(job)
         print(f"  {job['total']:>4} · {job['track'] or '?':<16} · {job['title']} @ {job['company']}")
+    _trace_belgium(raw, fresh, kept, scored)
     return scored
 
 
