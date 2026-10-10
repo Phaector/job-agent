@@ -564,14 +564,46 @@ finally:
     letter_pdf._download_font = _real_dl
     letter_pdf.CFG["match_fonts"] = True
 
+check(letter_pdf._is_ttf(b"\x00\x01\x00\x00rest") is True, "a real TrueType file is recognised")
+check(letter_pdf._is_ttf(b"<!doctype html>") is False, "an error page is not a font")
+check(letter_pdf._is_ttf(b"") is False, "and neither is nothing at all")
+
 _bad = letter_pdf.FONT_CACHE / "JunkTest-Regular.ttf"
 _bad.parent.mkdir(parents=True, exist_ok=True)
 _bad.write_bytes(b"<!doctype html><html>not a font at all</html>" * 40)
+_real_locate = letter_pdf._locate
 try:
-    letter_pdf._download_font("Junk Test", False)       # no network here, so this fails
+    letter_pdf._locate = lambda family: None           # nothing to download, offline
+    letter_pdf._download_font("Junk Test", False)
     check(not _bad.exists(), "a cached file that is not a TTF is thrown away, not reused")
 finally:
+    letter_pdf._locate = _real_locate
     _bad.unlink(missing_ok=True)
+
+# A family that is not in the repository must be asked about once, not once
+# per letter, so the miss is remembered alongside the hits.
+_tries, _real_http = [], sources.http_get
+_real_index = letter_pdf.FONT_INDEX
+letter_pdf.FONT_INDEX = letter_pdf.FONT_CACHE / "sources-test.json"
+try:
+    letter_pdf.FONT_INDEX.unlink(missing_ok=True)
+
+
+    class _Missing:
+        status_code = 404
+        content = b""
+
+
+    sources.http_get = lambda url, **kw: (_tries.append(url), _Missing())[1]
+    check(letter_pdf._locate("Imaginary Face") is None, "a family that is not there resolves to nothing")
+    _first = len(_tries)
+    check(_first > 1, "which took a few guesses at where it might live")
+    check(letter_pdf._locate("Imaginary Face") is None, "asking again gives the same answer")
+    check(len(_tries) == _first, "without asking the repository a second time")
+finally:
+    sources.http_get = _real_http
+    letter_pdf.FONT_INDEX.unlink(missing_ok=True)
+    letter_pdf.FONT_INDEX = _real_index
 
 _pdf = Path("/tmp/job-agent-test-letter.pdf")
 _pdf.unlink(missing_ok=True)

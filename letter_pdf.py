@@ -9,7 +9,10 @@ to render. To use a real typeface for a particular application, drop a .ttf
 into fonts/ and name it under cover_letter.fonts in config.yaml.
 """
 import datetime as dt
+import io
+import json
 import re
+import urllib.parse
 from pathlib import Path
 
 from reportlab.lib.colors import HexColor
@@ -116,10 +119,15 @@ CLOSEST_FONT = {
     "lato": "Lato", "raleway": "Raleway", "work sans": "Work Sans", "dm sans": "DM Sans",
 }
 DEFAULT_FONT = {True: "EB Garamond", False: "Inter"}
-# Google's font API serves TTF rather than WOFF2 to a browser old enough not
-# to understand it, and reportlab can only embed TTF.
-LEGACY_UA = "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)"
+# Fonts come from Google's own repository rather than their stylesheet API,
+# because the repository serves .ttf, which is all reportlab can embed.
+FONT_REPO = "https://raw.githubusercontent.com/google/fonts/main"
+FONT_LICENCES = ("ofl", "apache", "ufl")
+# Most families there are a single variable file; the handful that are not
+# ship one file per weight.
+FONT_SHAPES = ("[wght]", "[opsz,wght]", "[wdth,wght]", "[wght,wdth]", "-Regular")
 FONT_CACHE = ROOT / "state" / "fonts"
+FONT_INDEX = FONT_CACHE / "sources.json"
 
 
 def tidy_family(detected: str) -> str:
@@ -148,31 +156,104 @@ def closest_font(detected: str, serif: bool) -> str:
 TTF_MAGIC = (b"\x00\x01\x00\x00", b"true", b"ttcf")
 
 
+def _is_ttf(blob: bytes) -> bool:
+    return bool(blob) and blob[:4] in TTF_MAGIC
+
+
+def _fetch(url: str):
+    r = sources.http_get(url, retries=1, timeout=25)
+    if r is None or getattr(r, "status_code", 0) != 200:
+        return None
+    blob = getattr(r, "content", b"") or b""
+    return blob if _is_ttf(blob) else None
+
+
+def _index() -> dict:
+    try:
+        return json.loads(FONT_INDEX.read_text())
+    except Exception:
+        return {}
+
+
+def _remember(family: str, shape) -> None:
+    FONT_CACHE.mkdir(parents=True, exist_ok=True)
+    try:
+        FONT_INDEX.write_text(json.dumps(dict(_index(), **{family: shape})))
+    except OSError:
+        pass
+
+
+def _locate(family: str):
+    """Where this family lives in the repository: [licence, shape], or None.
+
+    Looked up once and remembered, misses included, so a later letter for the
+    same house costs nothing.
+    """
+    known = _index()
+    if family in known:
+        return known[family]
+    bare = family.replace(" ", "")
+    slug = bare.lower()
+    for licence in FONT_LICENCES:
+        for shape in FONT_SHAPES:
+            r = sources.http_get(f"{FONT_REPO}/{licence}/{slug}/{bare}{shape}.ttf",
+                                 retries=0, timeout=12)
+            if r is not None and getattr(r, "status_code", 0) == 200:
+                _remember(family, [licence, shape])
+                return [licence, shape]
+    _remember(family, None)
+    return None
+
+
+def _instance(blob: bytes, weight: int, out: Path) -> bool:
+    """Cut one real weight out of a variable font.
+
+    A variable file's built-in default is often the lightest weight — Manrope's
+    is ExtraLight — so embedding it as it comes would set the letter in a face
+    nobody chose.
+    """
+    try:
+        from fontTools.ttLib import TTFont as _FT
+        from fontTools.varLib import instancer
+    except ImportError:
+        return False
+    try:
+        font = _FT(io.BytesIO(blob))
+        if "fvar" not in font:
+            out.write_bytes(blob)
+            return True
+        instancer.instantiateVariableFont(font, {"wght": weight}, inplace=True,
+                                          updateFontNames=True)
+        font.save(str(out))
+        return True
+    except Exception as e:
+        print(f"  [Letter] could not cut {out.stem} from the variable font: {e}")
+        return False
+
+
 def _download_font(family: str, bold: bool):
     """One weight of a Google font as a .ttf on disk, or None."""
     FONT_CACHE.mkdir(parents=True, exist_ok=True)
-    path = FONT_CACHE / f"{family.replace(' ', '')}-{'Bold' if bold else 'Regular'}.ttf"
+    bare = family.replace(" ", "")
+    path = FONT_CACHE / f"{bare}-{'Bold' if bold else 'Regular'}.ttf"
     if path.exists():
-        if path.read_bytes()[:4] in TTF_MAGIC:
+        if _is_ttf(path.read_bytes()[:4]):
             return path
-        path.unlink()                   # a bad cache entry, from a failed fetch
-    # The v1 stylesheet API wants + for spaces, and serves TTF rather than
-    # WOFF2 to a browser too old to understand it.
-    query = f"{family.replace(' ', '+')}:{'700' if bold else '400'}"
-    css = sources.http_get(f"https://fonts.googleapis.com/css?family={query}",
-                           headers={"User-Agent": LEGACY_UA}, retries=1, timeout=15)
-    if css is None or getattr(css, "status_code", 0) != 200:
+        path.unlink()                      # a bad cache entry, from a failed fetch
+    found = _locate(family)
+    if not found:
         return None
-    m = re.search(r"url\((https://[^)\s]+?\.ttf)\)", getattr(css, "text", "") or "")
-    if not m:
+    licence, shape = found
+    slug = family.lower().replace(" ", "")
+    if shape == "-Regular":                # a family shipped one weight per file
+        blob = _fetch(f"{FONT_REPO}/{licence}/{slug}/{bare}-{'Bold' if bold else 'Regular'}.ttf")
+        if not blob:
+            return None
+        path.write_bytes(blob)
+        return path
+    blob = _fetch(f"{FONT_REPO}/{licence}/{slug}/{urllib.parse.quote(bare + shape)}.ttf")
+    if not blob or not _instance(blob, 700 if bold else 400, path):
         return None
-    data = sources.http_get(m.group(1), retries=1, timeout=20)
-    if data is None or getattr(data, "status_code", 0) != 200:
-        return None
-    blob = getattr(data, "content", b"") or b""
-    if blob[:4] not in TTF_MAGIC:
-        return None
-    path.write_bytes(blob)
     return path
 
 
