@@ -155,6 +155,18 @@ def _trace_belgium(raw, fresh, kept, scored):
             f"{screened} past the screen, {final} scored (of {len(scored)} scored in total).")
     print("[Belgium] " + line)
     sources.annotate("notice" if final else "warning", line)
+
+    # The screen is where Belgium loses most of its postings, so say what it
+    # rejected and why. Keeping the titles makes it possible to tell a correct
+    # rejection from the screen quietly preferring what it already knows.
+    kept_urls = {j.get("norm_url") for j in kept}
+    rejected = [j for j in fresh
+                if _is_belgian(j.get("location")) and j.get("norm_url") not in kept_urls]
+    if rejected:
+        shown = "; ".join(f"{j['title']} @ {j['company'] or '?'} — {j.get('screen_reason', '?')}"
+                          for j in rejected[:12])
+        print(f"[Belgium] screen rejected {len(rejected)}: {shown}")
+        sources.annotate("warning", f"Screen rejected {len(rejected)} Belgian postings. {shown}")
     return at_source
 
 

@@ -119,8 +119,14 @@ def screen(jobs: list, profile: str, taste: str) -> list:
             v = verdicts.get(i, {"keep": True})
             if v.get("keep", True):
                 kept.append(j)
+            else:
+                j["screen_reason"] = clean_reason(v.get("reason"))
         time.sleep(0.5)
     return kept
+
+
+def clean_reason(reason) -> str:
+    return " ".join(str(reason or "no reason given").split())[:80]
 
 
 # ─── Step 2: deep score ───────────────────────────────────────────────────────
