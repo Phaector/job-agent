@@ -22,6 +22,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (BaseDocTemplate, Frame, PageTemplate, Paragraph,
                                 Spacer)
 
+import sources
 from settings import CONFIG, ROOT
 
 CFG = CONFIG.get("cover_letter", {})
@@ -95,13 +96,106 @@ def _register_custom_fonts():
     return pairs
 
 
-def fonts_for(serif: bool) -> dict:
-    """Body, bold and display faces. Custom files win, else the built-ins."""
+# The typeface a company licenses cannot be downloaded, so each is matched to
+# the closest one that can. Keys are matched inside the detected family name.
+CLOSEST_FONT = {
+    # serif, roughly from high-contrast display down to book faces
+    "didot": "Playfair Display", "bodoni": "Playfair Display", "playfair": "Playfair Display",
+    "canela": "Lora", "tiempos": "Lora", "lyon": "Lora", "chronicle": "Lora",
+    "garamond": "EB Garamond", "sabon": "EB Garamond", "minion": "EB Garamond",
+    "caslon": "Libre Caslon Text", "baskerville": "Libre Baskerville",
+    "georgia": "Libre Baskerville", "times": "Libre Baskerville", "freight": "Lora",
+    "recoleta": "Playfair Display", "editorial": "Playfair Display", "larken": "Playfair Display",
+    # sans
+    "futura": "Jost", "avenir": "Jost", "jost": "Jost", "gotham": "Jost",
+    "circular": "Poppins", "maison": "Poppins", "poppins": "Poppins",
+    "grotesk": "Space Grotesk", "grotesque": "Space Grotesk",
+    "helvetica": "Inter", "neue": "Inter", "suisse": "Inter", "aktiv": "Inter",
+    "sohne": "Inter", "söhne": "Inter", "graphik": "Inter", "founders": "Inter",
+    "inter": "Inter", "arial": "Roboto", "roboto": "Roboto", "montserrat": "Montserrat",
+    "lato": "Lato", "raleway": "Raleway", "work sans": "Work Sans", "dm sans": "DM Sans",
+}
+DEFAULT_FONT = {True: "EB Garamond", False: "Inter"}
+# Google's font API serves TTF rather than WOFF2 to a browser old enough not
+# to understand it, and reportlab can only embed TTF.
+LEGACY_UA = "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)"
+FONT_CACHE = ROOT / "state" / "fonts"
+
+
+def closest_font(detected: str, serif: bool) -> str:
+    low = (detected or "").lower()
+    for token, family in CLOSEST_FONT.items():
+        if token in low:
+            return family
+    return DEFAULT_FONT[bool(serif)]
+
+
+# The first four bytes of a real TrueType file. Checked before anything is
+# cached, so one bad response cannot poison every later run.
+TTF_MAGIC = (b"\x00\x01\x00\x00", b"true", b"ttcf")
+
+
+def _download_font(family: str, bold: bool):
+    """One weight of a Google font as a .ttf on disk, or None."""
+    FONT_CACHE.mkdir(parents=True, exist_ok=True)
+    path = FONT_CACHE / f"{family.replace(' ', '')}-{'Bold' if bold else 'Regular'}.ttf"
+    if path.exists():
+        if path.read_bytes()[:4] in TTF_MAGIC:
+            return path
+        path.unlink()                   # a bad cache entry, from a failed fetch
+    # The v1 stylesheet API wants + for spaces, and serves TTF rather than
+    # WOFF2 to a browser too old to understand it.
+    query = f"{family.replace(' ', '+')}:{'700' if bold else '400'}"
+    css = sources.http_get(f"https://fonts.googleapis.com/css?family={query}",
+                           headers={"User-Agent": LEGACY_UA}, retries=1, timeout=15)
+    if css is None or getattr(css, "status_code", 0) != 200:
+        return None
+    m = re.search(r"url\((https://[^)\s]+?\.ttf)\)", getattr(css, "text", "") or "")
+    if not m:
+        return None
+    data = sources.http_get(m.group(1), retries=1, timeout=20)
+    if data is None or getattr(data, "status_code", 0) != 200:
+        return None
+    blob = getattr(data, "content", b"") or b""
+    if blob[:4] not in TTF_MAGIC:
+        return None
+    path.write_bytes(blob)
+    return path
+
+
+def fonts_for(brand: dict) -> dict:
+    """Body, bold and display faces, as close to the company's as licensing allows.
+
+    A file named in config wins. Otherwise the detected family is matched to
+    the nearest Google font and fetched. Anything that fails falls back to the
+    faces built into every PDF reader, so a letter always renders.
+    """
+    serif = bool(brand.get("serif"))
     custom = _register_custom_fonts()
     base = ("Times-Roman", "Times-Bold") if serif else ("Helvetica", "Helvetica-Bold")
-    return {"body": custom.get("body", base[0]),
-            "bold": custom.get("body_bold", base[1]),
-            "display": custom.get("heading", custom.get("body_bold", base[1]))}
+    picked = {"body": custom.get("body", base[0]),
+              "bold": custom.get("body_bold", base[1]),
+              "display": custom.get("heading", custom.get("body_bold", base[1])),
+              "named": ""}
+    if custom.get("body") or not CFG.get("match_fonts", True):
+        return picked
+    family = closest_font(brand.get("font_name", ""), serif)
+    try:
+        regular, strong = _download_font(family, False), _download_font(family, True)
+        if not regular:
+            return picked
+        name = family.replace(" ", "")
+        pdfmetrics.registerFont(TTFont(name, str(regular)))
+        picked["body"] = name
+        if strong:
+            pdfmetrics.registerFont(TTFont(f"{name}-Bold", str(strong)))
+            picked["bold"] = picked["display"] = f"{name}-Bold"
+        else:
+            picked["bold"] = picked["display"] = name
+        picked["named"] = family
+    except Exception as e:                      # a font must never cost a letter
+        print(f"  [Letter] could not use {family}: {e}")
+    return picked
 
 
 class _Letterhead:
@@ -155,7 +249,7 @@ def _clean(text: str) -> str:
 
 
 def build_letter_pdf(path, letter: str, company: str, role: str, brand: dict,
-                     recipient: str = "", sender: dict = None) -> Path:
+                     recipient: str = "", sender: dict = None, fonts: dict = None) -> Path:
     """Write the PDF and return its path.
 
     letter: the body, paragraphs separated by blank lines, no greeting or
@@ -164,7 +258,7 @@ def build_letter_pdf(path, letter: str, company: str, role: str, brand: dict,
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     sender = sender or sender_for()
-    fonts = fonts_for(bool(brand.get("serif")))
+    fonts = fonts or fonts_for(brand)
     ink = HexColor(brand.get("ink", "#141414"))
     accent = HexColor(brand.get("accent", "#1F1F1F"))
     muted = HexColor(brand.get("muted", "#6B6B6B"))

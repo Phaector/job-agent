@@ -69,6 +69,10 @@ cover_letter:
                    put these cv points first, answer these yourself, from your own notes,
                    resume changes, fit]
   keep_old_versions: true         # a new letter is added below the old one, never over it
+  # Set the letter in the company's own typeface, or the closest Google font
+  # to it (their real licence cannot be downloaded). Falls back to the faces
+  # in `fonts:` if you add .ttf files there, then to the PDF built-ins.
+  match_fonts: true
   sender:                         # printed on the letterhead; empty lines are left out
     name: Phaedra Imschoot
     email: phaedra.imschoot@gmail.com

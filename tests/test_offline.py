@@ -451,6 +451,56 @@ check(letter_pdf.sender_for("Ghent", _profile_contact)["location"] == "Ghent",
 check(letter_pdf.sender_for("Ghent", "")["phone"].startswith("+32"),
       "config supplies the number when the profile has none")
 
+# ── Typeface: the company's own, or the nearest one that can be embedded ──
+check(not branding.is_usable_accent((0, 122, 255)), "a platform blue is not a brand colour")
+check(not branding.is_usable_accent((10, 102, 194)), "LinkedIn blue is not a brand colour either")
+check(branding.is_usable_accent((231, 121, 43)), "an orange still is")
+check(branding.site_root("https://www.hermes.com/?utm_source=google&gclid=abc")
+      == "https://www.hermes.com", "a campaign tail is stripped off a stored website")
+check(branding.site_root("https://x.be/fr/careers") == "https://x.be",
+      "and a deep link comes back to the home page, where the brand lives")
+
+check(letter_pdf.closest_font("Didot HTF", True) == "Playfair Display", "Didot maps to Playfair")
+check(letter_pdf.closest_font("Söhne Buch", False) == "Inter", "Söhne maps to Inter")
+check(letter_pdf.closest_font("Futura PT", False) == "Jost", "Futura maps to Jost")
+check(letter_pdf.closest_font("Canela Text", True) == "Lora", "Canela maps to Lora")
+check(letter_pdf.closest_font("", True) == "EB Garamond", "an unknown serif gets a serif default")
+check(letter_pdf.closest_font("Unknowable Grotesk Neue", False) == "Space Grotesk",
+      "an unknown family still matches on a word it contains")
+check(letter_pdf.closest_font("Nothing Familiar", False) == "Inter", "otherwise the sans default")
+
+_real_dl, _asked = letter_pdf._download_font, []
+
+
+def _no_font(family, bold):
+    _asked.append((family, bold))
+    return None                     # the fetch failed, as it will with no network
+
+
+try:
+    letter_pdf._download_font = _no_font
+    _f = letter_pdf.fonts_for({"serif": True, "font_name": "Bodoni Moda"})
+    check(_asked and _asked[0][0] == "Playfair Display", "the matched family is the one fetched")
+    check(_f["body"] == "Times-Roman" and _f["bold"] == "Times-Bold",
+          "a failed download falls back to a built-in serif, never to no letter")
+    check(_f["named"] == "", "and the letter does not claim a font it could not get")
+    _asked.clear()
+    letter_pdf.CFG["match_fonts"] = False
+    letter_pdf.fonts_for({"serif": False, "font_name": "Futura"})
+    check(_asked == [], "font matching can be switched off in config")
+finally:
+    letter_pdf._download_font = _real_dl
+    letter_pdf.CFG["match_fonts"] = True
+
+_bad = letter_pdf.FONT_CACHE / "JunkTest-Regular.ttf"
+_bad.parent.mkdir(parents=True, exist_ok=True)
+_bad.write_bytes(b"<!doctype html><html>not a font at all</html>" * 40)
+try:
+    letter_pdf._download_font("Junk Test", False)       # no network here, so this fails
+    check(not _bad.exists(), "a cached file that is not a TTF is thrown away, not reused")
+finally:
+    _bad.unlink(missing_ok=True)
+
 _pdf = Path("/tmp/job-agent-test-letter.pdf")
 _pdf.unlink(missing_ok=True)
 letter_pdf.build_letter_pdf(_pdf, "First paragraph.\n\nSecond paragraph with <angle> & ampersand.",

@@ -404,17 +404,22 @@ def cover_letters(db, rows, profile, only_page=None):
                 db.update_properties(row["id"], {"Website": {"url": site}})
         brand = branding.brand_for(site, company)
         sender = letter_pdf.sender_for(row.get("location") or "", profile)
+        fonts = letter_pdf.fonts_for(brand)
+        set_in = (f"set in {fonts['named']}" if fonts.get("named")
+                  else "set in the default face")
+        if brand.get("font_name") and fonts.get("named"):
+            set_in += f" (closest to their {brand['font_name'].title()})"
         print(f"  [Letter] {company}: accent {brand['accent']}, "
               f"{'serif' if brand['serif'] else 'sans'} ({brand.get('source')}); "
-              f"{sender['region'].upper()} contact details")
+              f"{set_in}; {sender['region'].upper()} contact details")
         sources.annotate("notice", f"Letter for {company}: {brand.get('source')}, "
-                                   f"accent {brand['accent']}, "
+                                   f"accent {brand['accent']}, {set_in}, "
                                    f"{'used your notes' if notes else 'no notes of yours on the row'}")
         pdf_path = attached = None
         try:
             pdf_path = letter_pdf.build_letter_pdf(
                 settings.LETTER_DIR / _letter_filename(company, role, version),
-                out["letter"], company, role, brand, sender=sender)
+                out["letter"], company, role, brand, sender=sender, fonts=fonts)
         except Exception as e:                      # never lose the text over a layout error
             print(f"  [Letter] could not render the PDF for {company}: {e}")
         if pdf_path:

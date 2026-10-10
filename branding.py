@@ -214,8 +214,34 @@ def hsl(rgb):
     return h, s, l
 
 
+# Colours that belong to a platform, not to the company whose page they sit
+# on. Hermès came out Apple blue, picked up from a stylesheet rather than
+# from anything of theirs.
+PLATFORM_COLOURS = {
+    (0, 122, 255), (10, 102, 194), (24, 119, 242), (66, 133, 244), (29, 161, 242),
+    (37, 211, 102), (255, 0, 0), (230, 0, 35), (0, 119, 181), (59, 89, 152),
+    (221, 75, 57), (52, 168, 83), (251, 188, 5), (234, 67, 53), (88, 86, 214),
+    (255, 45, 85), (90, 200, 250), (255, 149, 0), (76, 217, 100),
+}
+# Below this, the winning colour is a guess rather than a reading, and a
+# wrong accent on a letter is worse than an honest neutral one.
+MIN_CONFIDENCE = 30
+
+
+def site_root(url: str) -> str:
+    """Just the scheme and host of a stored website.
+
+    A row's Website is often a deep or campaign-tagged link ("…/?gclid=…"),
+    and the brand's own colours and type live on the home page, not there.
+    """
+    m = re.match(r"(https?://[^/?#]+)", url or "")
+    return m.group(1) if m else (url or "")
+
+
 def is_usable_accent(rgb) -> bool:
     """Coloured enough to read as a choice, not black, white or a grey."""
+    if tuple(rgb) in PLATFORM_COLOURS:
+        return False
     _h, s, l = hsl(rgb)
     return s >= 0.18 and 0.12 <= l <= 0.78
 
@@ -300,6 +326,7 @@ def brand_for(website: str, company: str = "") -> dict:
     """Accent colour, ink, muted tone and serif-or-not for one company."""
     if not CFG.get("enabled", True) or not website:
         return dict(NEUTRAL, source="no website on the row")
+    website = site_root(website)
     r = sources.http_get(website, retries=1)
     if r is None or not getattr(r, "text", ""):
         return dict(NEUTRAL, source=f"could not read {website}")
@@ -317,10 +344,15 @@ def brand_for(website: str, company: str = "") -> dict:
     for rgb, weight in _colour_candidates(inline).items():
         scores[rgb] = scores.get(rgb, 0) + weight
 
-    if not scores:
+    accent = max(scores, key=lambda c: (scores[c], -hsl(c)[2])) if scores else None
+    if accent is None:
         brand = dict(NEUTRAL, source=f"no brand colour found on {website}")
+    elif scores[accent] < MIN_CONFIDENCE:
+        # Nothing on the page declared this as theirs; it was simply the most
+        # common colour, and on a big site that is often a stray UI shade.
+        brand = dict(NEUTRAL, source=f"no colour confidently theirs on {website} "
+                                     f"(best guess {to_hex(accent)} scored {scores[accent]})")
     else:
-        accent = max(scores, key=lambda c: (scores[c], -hsl(c)[2]))
         brand = {"accent": to_hex(accent), "ink": to_hex(darken(accent, 0.62)),
                  "muted": to_hex(mute(accent)), "source": f"colour from {website}"}
 
