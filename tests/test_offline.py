@@ -708,6 +708,24 @@ check(branding.find_website("Lucien Pagès Communication", "",
       == "https://www.lucienpages.com", "a site in the posting text wins before any lookup")
 check(branding.find_website("X", "") == "", "too short a name is not looked up")
 
+# A Brussels brand came back as a same-named .com belonging to someone else.
+class _Page:
+    def __init__(self, text): self.text = text
+
+
+_real_get2 = sources.http_get
+sources.http_get = lambda url, *a, **k: _Page("Welcome to Bellerose, Brussels") if "bellerose.be" in str(url) else None
+try:
+    check(branding._local_first("https://belle-rose.com", "Bellerose", (".be", ".com"))
+          == "https://bellerose.be", "the local domain wins when the page really is theirs")
+    sources.http_get = lambda *a, **k: None
+    check(branding._local_first("https://belle-rose.com", "Bellerose", (".be", ".com"))
+          == "https://belle-rose.com", "but only when it actually answers")
+    check(branding._local_first("https://bellerose.be", "Bellerose", (".be",))
+          == "https://bellerose.be", "an already-local match is left alone")
+finally:
+    sources.http_get = _real_get2
+
 
 class _LookupDB:
     def __init__(self, text=""):

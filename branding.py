@@ -122,6 +122,33 @@ def _from_search(company: str):
     return ""
 
 
+def _verify(url: str, company: str) -> bool:
+    """Does this page actually belong to them, or just share a name."""
+    r = sources.http_get(url, retries=0, timeout=10)
+    if r is None or not getattr(r, "text", ""):
+        return False
+    return _norm(company)[:6] in _norm(r.text[:6000])
+
+
+def _local_first(found: str, company: str, prefer) -> str:
+    """Prefer the company's own country domain over a same-named foreign one.
+
+    Two companies can share a name, and the directory returns whichever it
+    knows: a Brussels brand came back as a .com belonging to someone else.
+    When the match is not already on the expected domain, the local one is
+    tried and used if the page really is theirs.
+    """
+    stem = _norm(company)[:30]
+    wanted = prefer[0] if prefer else ".com"
+    if not stem or found.endswith(wanted) or f"{stem}{wanted}" in found:
+        return found
+    local = f"https://{stem}{wanted}"
+    if _verify(local, company):
+        print(f"  [Website] preferring {local} over {found} for {company}")
+        return local
+    return found
+
+
 def find_website(company: str, posting_url: str = "", description: str = "",
                  page_html: str = "", location: str = "") -> str:
     """The company's own site. Cheapest sources first, paid search last."""
@@ -143,7 +170,7 @@ def find_website(company: str, posting_url: str = "", description: str = "",
             print(f"  [Website] {lookup.__name__} failed for {company}: {e}")
             continue
         if found and _plausible_site(found, company):
-            return found
+            return _local_first(found, company, prefer)
         if found:                               # a search result we cannot vouch for
             print(f"  [Website] ignoring {found} for {company}: name does not match")
 
@@ -152,10 +179,7 @@ def find_website(company: str, posting_url: str = "", description: str = "",
         return ""
     for tld in prefer:
         url = f"https://{stem}{tld}"
-        r = sources.http_get(url, retries=0, timeout=10)
-        if r is None or not getattr(r, "text", ""):
-            continue
-        if stem[:6] in _norm(r.text[:4000]):
+        if _verify(url, company):
             return url
     return ""
 
