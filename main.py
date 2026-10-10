@@ -57,8 +57,8 @@ def load_profile(db) -> str:
 
 
 # ─── Collecting postings ──────────────────────────────────────────────────────
-def watchlist_boards(rows):
-    """Config watchlist + every company board linked in your Notion DB + seeds."""
+def watchlist_boards(rows, db=None):
+    """Config watchlist + boards linked in your Notion DB, seeds and watchlist page."""
     boards = {}
     for ats, slugs in (CONFIG.get("watchlist") or {}).items():
         for slug, name in (slugs or {}).items():
@@ -74,12 +74,43 @@ def watchlist_boards(rows):
             key = (info["ats"], info["slug"], info.get("eu", False))
             if not boards.get(key):
                 boards[key] = company or None
+    boards.update(watchlist_page_boards(db))
     return boards
 
 
-def collect(rows):
+def watchlist_page_boards(db):
+    """Companies she has pasted onto the Company Watchlist page in Notion.
+
+    She adds the careers page she browses, not a feed, so each link is read
+    as a job board directly and, failing that, the page is fetched to see
+    which one sits behind it. What could not be read is reported rather than
+    dropped, since a link silently doing nothing is worse than no link.
+    """
+    page_id = (CONFIG.get("notion") or {}).get("watchlist_page_id")
+    if not db or not page_id:
+        return {}
+    urls = db.page_links(page_id)
+    if not urls:
+        return {}
+    boards, unread = {}, []
+    for url in urls:
+        info, note = sources.discover_board(url)
+        if info and info.get("slug"):
+            boards[(info["ats"], info["slug"], info.get("eu", False))] = None
+            print(f"  [Watchlist page] {url} -> {note}")
+        else:
+            unread.append(f"{url} ({note})")
+            print(f"  [Watchlist page] {url}: {note}")
+    print(f"[Watchlist page] {len(urls)} link(s), {len(boards)} now watched")
+    if unread:
+        sources.annotate("warning", "From your Company Watchlist page, these cannot be "
+                                    "watched automatically: " + "; ".join(unread[:8]))
+    return boards
+
+
+def collect(rows, db=None):
     jobs = []
-    boards = watchlist_boards(rows)
+    boards = watchlist_boards(rows, db)
     print(f"[Watchlist] Reading {len(boards)} company boards")
     for (ats, slug, eu), name in sorted(boards.items()):
         found = sources.fetch_board(ats, slug, name, eu)
@@ -171,8 +202,8 @@ def _trace_belgium(raw, fresh, kept, scored):
     return at_source
 
 
-def search_and_score(rows, profile, taste, seen):
-    raw = collect(rows)
+def search_and_score(rows, profile, taste, seen, db=None):
+    raw = collect(rows, db)
     existing_urls = {filters.normalize_url(r["url"]) for r in rows if r.get("url")}
     stats, fresh = Counter(), []
     dropped_be = Counter()
@@ -390,7 +421,7 @@ def main():
         return
 
     seen = load_seen()
-    scored = search_and_score(rows, profile, taste, seen)
+    scored = search_and_score(rows, profile, taste, seen, db)
     select_and_push(db, rows, scored)
     expire_queue(db, rows)
     if not db.dry_run:

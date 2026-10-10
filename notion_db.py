@@ -5,6 +5,7 @@ from config.yaml, optional properties are skipped if they don't exist,
 and everything that isn't a column goes into the page body.
 """
 import datetime as dt
+import re
 import time
 from pathlib import Path
 
@@ -251,6 +252,40 @@ class NotionDB:
                 break
             cursor = data.get("next_cursor")
         return "\n".join(lines)
+
+    def page_links(self, page_id) -> list:
+        """Every url on a page: hyperlinks, bookmarks, embeds and bare text.
+
+        The watchlist page is written by hand, so a company may appear as a
+        bare url, as a link behind its name, or as a bookmark block.
+        """
+        if self.offline or not page_id:
+            return []
+        found, cursor = [], None
+        while True:
+            path = f"/blocks/{page_id}/children?page_size=100" + (f"&start_cursor={cursor}" if cursor else "")
+            data = self._req("GET", path)
+            if not data:
+                break
+            for b in data.get("results", []):
+                kind = b.get("type")
+                body = b.get(kind) or {}
+                if isinstance(body.get("url"), str):          # bookmark, embed, link_preview
+                    found.append(body["url"])
+                for piece in body.get("rich_text", []) or []:
+                    if piece.get("href"):
+                        found.append(piece["href"])
+                    found += re.findall(r"https?://[^\s\"'<>)\]]+", piece.get("plain_text", "") or "")
+            if not data.get("has_more"):
+                break
+            cursor = data.get("next_cursor")
+        seen, out = set(), []
+        for url in found:
+            url = url.strip().rstrip(".,);")
+            if url not in seen:
+                seen.add(url)
+                out.append(url)
+        return out
 
     # ── writing ──
     def _set(self, props, key, types, value):

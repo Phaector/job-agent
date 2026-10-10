@@ -610,10 +610,10 @@ check(sources.search_fashionunited() == [], "the board can be switched off in co
 
 
 # ── Applications that went quiet ──
-def _row(rid, company, status, days_old, website="", url=""):
+def _row(rid, company, status, days_old, website="", url="", deadline=""):
     edited = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days_old)).isoformat()
     return {"id": rid, "company": company, "title": "Coordinator", "status": status,
-            "last_edited": edited, "website": website, "url": url}
+            "last_edited": edited, "website": website, "url": url, "deadline": deadline}
 
 
 check(writer._domain_of({"website": "https://www.christianwijnants.com"}) == "christianwijnants.com",
@@ -643,6 +643,10 @@ _rows = [
     _row("recent", "Les Jumelles", "Applied", 3, website="https://lesjumelles.be"),
     _row("not-applied", "Comme ça", "To Apply", 60, website="https://commeca.be"),
     _row("interviewed", "Suspicious Antwerp", "Interviewed", 60, website="https://suspiciousantwerp.com"),
+    _row("deadline-ahead", "Still Open NV", "Applied", 40,
+         deadline=(dt.date.today() + dt.timedelta(days=20)).isoformat()),
+    _row("deadline-passed", "Closed Already BV", "Applied", 40,
+         deadline=(dt.date.today() - dt.timedelta(days=5)).isoformat()),
 ]
 writer.CONFIG["archive_quiet"] = {"enabled": True, "after_days": 14,
                                   "statuses": ["Applied"], "archive_status": "Archived"}
@@ -652,9 +656,14 @@ try:
     _db = _ArchiveDB()
     writer.archive_quiet_applications(_db, _rows)
     _archived = {pid for pid, _s in _db.status}
-    check(_archived == {"old-silent"}, f"only the silent, stale application is archived ({_archived})")
-    check(_db.status[0][1] == "Archived", "it is set to Archived")
-    check(_db.notes == ["old-silent"], "and a note says why, so it can be undone")
+    check("deadline-ahead" not in _archived,
+          "an application whose deadline has not passed is left alone")
+    check("deadline-passed" in _archived, "one whose deadline has passed is archived")
+    check(_archived == {"old-silent", "deadline-passed"},
+          f"only the silent, stale, closed applications are archived ({_archived})")
+    check(all(s == "Archived" for _p, s in _db.status), "each is set to Archived")
+    check(set(_db.notes) == {"old-silent", "deadline-passed"},
+          "and each gets a note saying why, so it can be undone")
 
     # A mail failure reports every company as having replied; nothing may move.
     sources.mail_replies_since = lambda queries, since: {k for k, _d, _n in queries}
@@ -665,8 +674,8 @@ try:
     # The preview writes nothing at all. With no replies, both stale ones qualify.
     sources.mail_replies_since = lambda queries, since: set()
     _db3 = _ArchiveDB()
-    check(writer.archive_quiet_applications(_db3, _rows, dry_run=True) == 2,
-          "the preview counts both stale applications when none replied")
+    check(writer.archive_quiet_applications(_db3, _rows, dry_run=True) == 3,
+          "the preview counts the stale applications when none replied")
     check(_db3.status == [] and _db3.notes == [], "the preview changes nothing")
 finally:
     sources.mail_replies_since = _real_replies
@@ -674,6 +683,39 @@ finally:
                                       "statuses": ["Applied"], "archive_status": "Archived"}
 check(writer.archive_quiet_applications(_ArchiveDB(), _rows) == 0, "switched off, it does nothing")
 check(sources.mail_replies_since([], dt.date.today()) == set(), "no candidates means no mail check")
+
+
+# ── The Company Watchlist page she keeps in Notion ──
+class _LinkDB:
+    def __init__(self, links): self.links = links
+    def page_links(self, page_id): return self.links
+
+
+_real_discover = sources.discover_board
+sources.discover_board = lambda url: (
+    ({"ats": "teamtailor", "slug": "careers.karlaotto.com", "eu": False}, "teamtailor:careers.karlaotto.com")
+    if "karlaotto" in url else (None, "no job board the agent can read"))
+main.CONFIG["notion"]["watchlist_page_id"] = "page-1"
+try:
+    _b = main.watchlist_page_boards(_LinkDB([
+        "https://careers.karlaotto.com/jobs", "https://togethergroup.com/talent/"]))
+    check(("teamtailor", "careers.karlaotto.com", False) in _b,
+          "a careers page that resolves to a board is watched")
+    check(len(_b) == 1, "one that cannot be read is not silently added")
+    check(main.watchlist_page_boards(_LinkDB([])) == {}, "an empty page adds nothing")
+    check(main.watchlist_page_boards(None) == {}, "no database means no page read")
+    _all = main.watchlist_boards([], _LinkDB(["https://careers.karlaotto.com/jobs"]))
+    check(("teamtailor", "careers.karlaotto.com", False) in _all,
+          "page boards join the config watchlist and seeds")
+finally:
+    sources.discover_board = _real_discover
+
+check(sources.ATS_IN_PAGE.search('<a href="https://job-boards.greenhouse.io/acme/jobs/1">Apply</a>'),
+      "a greenhouse link inside a careers page is spotted")
+check(sources.ATS_IN_PAGE.search("see https://acme.recruitee.com/o/role for details"),
+      "so is a recruitee one")
+check(not sources.ATS_IN_PAGE.search("https://example.com/about"),
+      "an ordinary page link is not mistaken for a board")
 
 
 # ── Looking the company up ──

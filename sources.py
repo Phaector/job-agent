@@ -19,6 +19,7 @@ import os
 import re
 import time
 import urllib.parse
+import urllib.robotparser
 import xml.etree.ElementTree as ET
 
 import requests
@@ -427,6 +428,68 @@ def search_serpapi(q, location, gl="us"):
 
 
 # ─── Reading one posting from any link ───────────────────────────────────────
+ROBOTS_CACHE = {}
+
+
+def robots_allows(url: str) -> bool:
+    """Whether a site's robots.txt lets us read this page.
+
+    Careers pages pasted into the watchlist are fetched to work out which
+    applicant tracking system sits behind them, and some of those sites say
+    no. A site that cannot be checked is treated as allowed, which is the
+    usual reading, but one that says no is left alone.
+    """
+    m = re.match(r"(https?://[^/]+)", url or "")
+    if not m:
+        return False
+    base = m.group(1)
+    if base not in ROBOTS_CACHE:
+        parser = urllib.robotparser.RobotFileParser()
+        r = http_get(f"{base}/robots.txt", retries=0, timeout=10)
+        try:
+            parser.parse((r.text if r is not None else "").splitlines())
+        except Exception:
+            ROBOTS_CACHE[base] = None
+            return True
+        ROBOTS_CACHE[base] = parser
+    parser = ROBOTS_CACHE[base]
+    if parser is None:
+        return True
+    try:
+        return parser.can_fetch(SESSION.headers.get("User-Agent", "*"), url)
+    except Exception:
+        return True
+
+
+ATS_IN_PAGE = re.compile(
+    r"https?://(?:[\w-]+\.)?(?:boards\.greenhouse\.io|job-boards\.greenhouse\.io|"
+    r"jobs\.lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|[\w-]+\.recruitee\.com|"
+    r"[\w-]+\.teamtailor\.com|careers\.[\w.-]+/jobs)[^\s\"'<>)]*", re.I)
+
+
+def discover_board(url: str):
+    """Work out which job board sits behind a careers page.
+
+    She pastes the page she browses, not a feed, so a link is first read as
+    an applicant tracking system directly and, failing that, the page is
+    fetched and searched for one. Returns (info, note) where info is what
+    detect_ats returns, or None with a note saying why not.
+    """
+    info = detect_ats(url)
+    if info and info.get("slug"):
+        return info, f"{info['ats']}:{info['slug']}"
+    if not robots_allows(url):
+        return None, "the site's robots.txt asks us not to read it"
+    r = http_get(url, retries=1, timeout=15)
+    if r is None or not getattr(r, "text", ""):
+        return None, "the page could not be read"
+    for found in ATS_IN_PAGE.findall(r.text):
+        info = detect_ats(found)
+        if info and info.get("slug"):
+            return info, f"{info['ats']}:{info['slug']} (found on the page)"
+    return None, "no job board the agent can read; the roles are probably loaded by JavaScript"
+
+
 # ─── Job boards (not tied to one company) ────────────────────────────────────
 # FashionUnited lists fashion jobs per country. Every Belgian fashion role
 # Phaedra has actually wanted came from here rather than from Adzuna, which

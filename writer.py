@@ -215,6 +215,8 @@ def archive_quiet_applications(db, rows, dry_run=False):
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
 
     stale = []
+    still_open = 0
+    today = dt.date.today()
     for row in rows:
         if row.get("status") not in watched:
             continue
@@ -222,8 +224,20 @@ def archive_quiet_applications(db, rows, dry_run=False):
             edited = dt.datetime.fromisoformat((row.get("last_edited") or "").replace("Z", "+00:00"))
         except ValueError:
             continue
-        if edited < cutoff:
-            stale.append(row)
+        if edited >= cutoff:
+            continue
+        # A deadline still to come means they have not finished looking yet,
+        # so silence says nothing. No deadline at all, and the clock applies.
+        try:
+            closes = dt.date.fromisoformat((row.get("deadline") or "")[:10])
+        except ValueError:
+            closes = None
+        if closes and closes >= today:
+            still_open += 1
+            continue
+        stale.append(row)
+    if still_open:
+        print(f"[Quiet] {still_open} left alone: their deadline has not passed")
     if not stale:
         if dry_run:
             sources.annotate("notice", "Preview only: no application has been untouched "

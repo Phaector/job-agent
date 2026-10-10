@@ -40,6 +40,10 @@ notion:
     job: Job
     internship: Internship
   cover_letter_trigger: Cover Letter   # Next Action option that triggers a draft
+  # A plain Notion page where you paste companies and careers pages to watch.
+  # Any link on it is read as a job board, or the page behind it is checked
+  # for one. Anything that cannot be read is reported rather than ignored.
+  watchlist_page_id: 3f5d1ac0402e80d38974f4ece9b06413
   # A row with no link is filled in from the job description you paste under a
   # heading with one of these names in the row's page.
   posting_headings: [job description, job posting, vacancy, vacature]
