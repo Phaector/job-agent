@@ -321,6 +321,19 @@ search:
       - {q: "management trainee België starter", location: "Belgium", gl: be}
 
 # ---------------------------------------------------------------------
+# JOB BOARDS: whole boards rather than one company's careers page.
+# FashionUnited is the Belgian fashion board. Every Belgian fashion role
+# worth applying to so far came from here, while Adzuna's Belgian results
+# were mostly generic tech and recruitment.
+# ---------------------------------------------------------------------
+job_boards:
+  fashionunited:
+    enabled: true
+    base: https://fashionunited.be
+    cities: [antwerpen, brussel, gent, brugge, leuven, hasselt, mechelen, kortrijk]
+    max_per_city: 20
+
+# ---------------------------------------------------------------------
 # WATCHLIST: company job boards read straight from their public feeds.
 # Format: board-slug: Display Name. Links already in your Notion DB and
 # in the seeds below are added automatically, so this list only needs

@@ -108,6 +108,11 @@ def collect(rows):
         for q in todays:
             jobs += sources.search_serpapi(q["q"], q["location"], q.get("gl", "us"))
 
+    fu = sources.search_fashionunited()
+    if fu:
+        print(f"[FashionUnited] {len(fu)} postings")
+    jobs += fu
+
     for url, source_name in sources.newsletter_job_links():
         job = sources.fetch_posting(url, source=source_name)
         if job:

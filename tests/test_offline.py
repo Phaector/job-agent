@@ -513,4 +513,57 @@ check(main._in_europe(_entry(8.0, "Ghent", "queue")), "a Queue row's location co
 check(not main._in_europe(_entry(8.0, "New York")), "New York is not Europe")
 
 
+# ── FashionUnited, the Belgian fashion board ──
+FU_PAGE = """<html><body><ul>
+<li class="card">
+  <h2><a href="/fashion-jobs/stagiair-marketing-and-communication-antwerpen-2029577"
+         title="Stagiair Marketing &amp; Communication">Stagiair Marketing &amp; Communication</a></h2>
+  <a href="/fashion-jobs/werken-bij/bestseller-belgium-jobs">BESTSELLER</a>
+  <p>Keizerstraat 9 | <a href="/fashion-jobs/in/antwerpen">Antwerpen</a>, Vlaanderen 2000</p>
+</li>
+<li class="card">
+  <h2><a href="/fashion-jobs/office-and-operations-coordinator-antwerpen-1987612">Office &amp; Operations Coordinator</a></h2>
+  <a href="/fashion-jobs/werken-bij/christian-wijnants-jobs">Christian Wijnants</a>
+  <p>Italiëlei 215 | <a href="/fashion-jobs/in/antwerpen">Antwerpen</a>, Vlaanderen 2000</p>
+</li>
+<li class="card">
+  <h2><a href="/fashion-jobs/verkoper-schelle-2029694">Verkoper</a></h2>
+  <a href="/fashion-jobs/werken-bij/vanharen-jobs">vanHaren</a>
+  <p><a href="/fashion-jobs/in/schelle">Schelle</a></p>
+</li>
+<li><a href="/fashion-jobs/in/gent">Jobs in Gent</a></li>
+<li><a href="/fashion-jobs/werken-bij">Alle werkgevers</a></li>
+</ul></body></html>"""
+
+
+class _FUResponse:
+    text = FU_PAGE
+
+
+_real_get, _real_sleep = sources.http_get, sources.time.sleep
+sources.http_get = lambda *a, **k: _FUResponse()
+sources.time.sleep = lambda *a, **k: None
+sources.CONFIG.setdefault("job_boards", {})["fashionunited"] = {
+    "enabled": True, "base": "https://fashionunited.be",
+    "cities": ["antwerpen"], "max_per_city": 20}
+try:
+    _fu = sources.search_fashionunited()
+finally:
+    sources.http_get, sources.time.sleep = _real_get, _real_sleep
+
+check(len(_fu) == 3, f"three job cards parsed, navigation links ignored ({len(_fu)})")
+_first = _fu[0]
+check(_first["title"] == "Stagiair Marketing & Communication", "the title is unescaped")
+check(_first["company"] == "BESTSELLER", "the employer comes from its own link")
+check(_first["url"].startswith("https://fashionunited.be/fashion-jobs/"), "links are absolute")
+check(_fu[1]["company"] == "Christian Wijnants", "a second card keeps its own employer")
+check(filters.location_bucket(_first["location"])[0] == "Antwerp",
+      f"the location buckets to Antwerp ({_first['location']!r})")
+check(filters.hard_filter(_fu[1])[0], "a coordinator role passes the filters")
+check(not filters.hard_filter(_fu[2])[0], "a Verkoper shop-floor role is dropped")
+_off = dict(sources.CONFIG["job_boards"]["fashionunited"], enabled=False)
+sources.CONFIG["job_boards"]["fashionunited"] = _off
+check(sources.search_fashionunited() == [], "the board can be switched off in config")
+
+
 print(f"All {passed} offline checks passed.")

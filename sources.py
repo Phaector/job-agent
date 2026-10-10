@@ -427,6 +427,69 @@ def search_serpapi(q, location, gl="us"):
 
 
 # ─── Reading one posting from any link ───────────────────────────────────────
+# ─── Job boards (not tied to one company) ────────────────────────────────────
+# FashionUnited lists fashion jobs per country. Every Belgian fashion role
+# Phaedra has actually wanted came from here rather than from Adzuna, which
+# returns mostly generic tech and recruitment for Belgium.
+#
+# There is no feed, so the listing pages are read. The parser keys off the
+# site's URL shapes rather than its class names, which survive a redesign:
+#   a job     /fashion-jobs/<slug>-<numeric id>
+#   a company /fashion-jobs/werken-bij/<name>-jobs
+#   a city    /fashion-jobs/in/<city>
+FU_JOB_RX = re.compile(r"^/fashion-jobs/[^/]+?-(\d{5,})/?$")
+FU_COMPANY_RX = re.compile(r"^/fashion-jobs/werken-bij/")
+FU_CITY_RX = re.compile(r"^/fashion-jobs/in/")
+
+
+def _fu_card(anchor):
+    """Walk up from a job link until the element also holds its company link."""
+    node = anchor
+    for _ in range(5):
+        node = node.parent
+        if node is None:
+            return anchor
+        if node.find("a", href=FU_COMPANY_RX):
+            return node
+    return anchor
+
+
+def search_fashionunited():
+    cfg = (CONFIG.get("job_boards") or {}).get("fashionunited") or {}
+    if not cfg.get("enabled"):
+        return []
+    base = (cfg.get("base") or "https://fashionunited.be").rstrip("/")
+    jobs, seen = [], set()
+    for city in cfg.get("cities") or []:
+        r = http_get(f"{base}/fashion-jobs/in/{city}", retries=1)
+        if r is None or not getattr(r, "text", ""):
+            print(f"  [FashionUnited] could not read {city}")
+            continue
+        soup = BeautifulSoup(r.text, "html.parser")
+        found = 0
+        for link in soup.find_all("a", href=FU_JOB_RX):
+            url = urllib.parse.urljoin(base, link["href"])
+            title = clean(link.get("title") or link.get_text(" ", strip=True))
+            if not title or url in seen:
+                continue
+            card = _fu_card(link)
+            employer = card.find("a", href=FU_COMPANY_RX)
+            where = card.find("a", href=FU_CITY_RX)
+            seen.add(url)
+            jobs.append(make_job(
+                url=url, title=title,
+                company=clean(employer.get_text(" ", strip=True)) if employer else "",
+                location=f"{clean(where.get_text(' ', strip=True)) if where else city}, Belgium",
+                description="", posted_at=None, source="FashionUnited"))
+            found += 1
+            if found >= int(cfg.get("max_per_city", 20)):
+                break
+        print(f"  [FashionUnited] {city}: {found}")
+        time.sleep(0.8)          # a courtesy gap, the site sets no crawl delay
+    return jobs
+
+
+# ─── Reading one posting from any link ───────────────────────────────────────
 def _jsonld_posting(soup):
     for script in soup.find_all("script", type="application/ld+json"):
         try:
