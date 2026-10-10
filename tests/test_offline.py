@@ -368,6 +368,45 @@ check("Belgian city" not in notes, "the resume section is not swept in")
 check("business side" not in notes, "the agent's own Fit section is not swept in")
 check(writer.her_draft("## Notes\nnothing of hers here") == "", "no section means no notes")
 
+# The heading she actually used was "Cover Letter Draft", not "My cover letter",
+# so her notes were skipped and the letter was written from the profile alone.
+_real_page = """## Why it fits
+- Ran 15+ events a year, 80-120 attendees.
+### What the role really needs
+- Press outreach: managed 20-25 corporate partners.
+# Cover Letter Draft
+I have a passion to help and promote brands through communications.
+I am also very open to explore other kind of positions or internships.
+## ✍️ Cover letter draft 1 · 02 Oct 2026
+Lucien Pages' roster of established luxury houses is exactly the mix I want.
+### Put these CV points first
+- Emergent Leuven: 15+ events a year
+### Answer these yourself before sending
+- Any personal connection worth naming?
+"""
+_hers = writer.her_draft(_real_page)
+check("open to explore other kind of positions" in _hers,
+      "a heading of hers called 'Cover Letter Draft' is read")
+check("roster of established" not in _hers, "the agent's own letter is not read back as her voice")
+check("Ran 15+ events a year, 80-120" not in _hers, "nor is the agent's Why it fits")
+check("Emergent Leuven" not in _hers, "nor its CV points")
+check("Any personal connection" not in _hers, "nor its questions")
+check(writer.her_draft("## Motivatie\nIk wil graag bij dit merk werken.") != "",
+      "a Dutch heading is read too")
+
+check(branding._plausible_site("https://www.christianwijnants.com", "Christian Wijnants"),
+      "a company's own site is recognised")
+check(not branding._plausible_site("https://sspcs.recruitee.com/o/x", "Suspicious Antwerp"),
+      "an applicant tracking host is not the company")
+check(not branding._plausible_site("https://fashionunited.be/x", "Comme ça"),
+      "nor is the job board it was listed on")
+check(not branding._plausible_site("https://www.linkedin.com/jobs/view/1", "Lacoste"),
+      "nor LinkedIn")
+check(branding.find_website("", "", "") == "", "no company name means no lookup")
+check(branding.find_website("Lucien Pagès Communication", "",
+                            "Apply at https://www.lucienpages.com/careers today")
+      == "https://www.lucienpages.com", "the site is taken from the posting text")
+
 check(branding.parse_color("#C8102E") == (200, 16, 46), "hex colour parsed")
 check(branding.parse_color("#abc") == (170, 187, 204), "short hex expanded")
 check(branding.parse_color("rgba(1,2,3,0)") is None, "a transparent colour is not a brand colour")

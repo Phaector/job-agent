@@ -55,7 +55,15 @@ cover_letter:
   # Headings in a row's page under which YOUR OWN notes live. Everything
   # until the next heading is read as your material: both the content and
   # any instruction to the writer ("say I'm open to other entry-level roles").
-  draft_headings: [my cover letter, my letter, my draft, my notes for the letter]
+  # Matched loosely, because the heading is rarely written the same way twice.
+  draft_headings: [cover letter, my letter, my draft, my notes, motivation, motivatie, sollicitatie]
+  # Headings the agent writes itself. Never read back as her voice, whatever
+  # the list above says, or a letter ends up rewriting its own prose.
+  agent_headings: [cover letter draft 1, cover letter draft 2, cover letter draft 3,
+                   cover letter draft 4, cover letter draft 5, "(claude)", job agent notes,
+                   why it fits, what the role really needs, gaps, details,
+                   put these cv points first, answer these yourself, from your own notes,
+                   resume changes, fit]
   keep_old_versions: true         # a new letter is added below the old one, never over it
   sender:                         # printed on the letterhead; empty lines are left out
     name: Phaedra Imschoot

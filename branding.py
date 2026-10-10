@@ -38,6 +38,61 @@ GENERIC = {"inherit", "initial", "unset", "revert", "currentcolor", "transparent
            "sans-serif", "serif", "monospace", "cursive", "fantasy", "emoji", "math"}
 
 
+# ─── Finding the company's own site ──────────────────────────────────────────
+# Most rows arrive with the Website column empty, and without a site there is
+# no brand to read, so nearly every letter fell back to the neutral style.
+# These hosts are where a posting lives, never the company itself.
+NOT_THE_COMPANY = (
+    "recruitee", "greenhouse", "lever.co", "workable", "ashbyhq", "teamtailor",
+    "myworkday", "workday", "adzuna", "linkedin", "indeed", "fashionunited",
+    "smartrecruiters", "icims", "jobvite", "rippling", "personio", "jobtoolz",
+    "bamboohr", "glassdoor", "ziprecruiter", "joinhandshake", "wellfound",
+    "google.com", "facebook.com", "instagram.com", "twitter.com", "x.com",
+    "youtube.com", "tiktok.com", "substack.com", "gstatic", "cloudflare",
+    "schema.org", "w3.org", "apple.com", "cookiebot", "googleapis",
+)
+
+
+def _plausible_site(url: str, company: str) -> bool:
+    """A link that looks like the employer's own front door."""
+    host = re.sub(r"^https?://(www\.)?", "", url or "").split("/")[0].lower()
+    if not host or "." not in host or any(bad in host for bad in NOT_THE_COMPANY):
+        return False
+    stem = re.sub(r"[^a-z0-9]", "", (company or "").lower())
+    root = re.sub(r"[^a-z0-9]", "", host.split(".")[0])
+    if not stem or not root:
+        return False
+    # The host should carry the company's name, or the other way round for
+    # the short domains fashion houses like ("ssp" for Suspicious Antwerp).
+    return root in stem or stem in root or stem[:8] == root[:8]
+
+
+def find_website(company: str, posting_url: str = "", description: str = "",
+                 page_html: str = "") -> str:
+    """The company's own site, dug out of the posting when the row has none."""
+    if not company:
+        return ""
+    for candidate in re.findall(r"https?://[^\s\"'<>)\]]+", f"{description} {page_html}"):
+        candidate = candidate.rstrip(".,);")
+        if _plausible_site(candidate, company):
+            m = re.match(r"https?://[^/]+", candidate)
+            return m.group(0) if m else ""
+    # Nothing in the text, so try the obvious domains and confirm the page
+    # actually belongs to them rather than a parked or squatted name.
+    stem = re.sub(r"[^a-z0-9]", "", (company or "").lower())[:30]
+    if len(stem) < 4:
+        return ""
+    for tld in (".com", ".be", ".eu", ".fr", ".nl"):
+        url = f"https://{stem}{tld}"
+        r = sources.http_get(url, retries=0, timeout=10)
+        if r is None or not getattr(r, "text", ""):
+            continue
+        head = r.text[:4000].lower()
+        if stem[:6] in re.sub(r"[^a-z0-9]", "", head):
+            return url
+    return ""
+
+
 # ─── Colour helpers ───────────────────────────────────────────────────────────
 def parse_color(raw: str):
     """'#abc', '#aabbcc', 'rgb(1,2,3)', 'rgba(1,2,3,.5)' -> (r, g, b) or None."""

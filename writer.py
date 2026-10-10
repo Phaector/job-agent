@@ -194,6 +194,7 @@ RULES
 - Open with the specific reason this role and company fit her, not with "I am writing to apply".
 - Pick the 2 or 3 strongest pieces of evidence from her profile for what THIS role needs and say what she did, concretely.
 - Never invent experience, numbers, tools or motivations. If the letter needs something only she can answer (why this company, a personal link to the brand), write a placeholder in [square brackets].
+- Do not state where she lives. She is a Belgian-American dual national who moves between Belgium and New York, and a letter that plants her in the wrong one reads as careless. Say only that she needs no visa for this country, and only where the posting raises it.
 - Mention US work authorization only if the posting raises sponsorship.
 - Style: plain, direct, human. Active voice. No adverbs. No em dashes. No "not X, but Y" constructions. No throat-clearing ("I'm excited to", "I believe that"). No grand closing one-liners. Vary sentence length. Name specific things instead of vague claims.
 
@@ -213,20 +214,29 @@ Return ONLY JSON:
 
 
 def her_draft(body: str) -> str:
-    """The text she wrote herself under one of her own headings.
+    """The text she wrote herself, from a heading down to the next one.
 
-    Reads from a heading whose text matches config (e.g. "## My Cover Letter
-    draft") down to the next heading, so the agent's own sections are skipped.
+    Her headings vary ("My cover letter draft", "Cover Letter Draft",
+    "Motivatie"), and requiring them to start with "my" meant her notes were
+    silently skipped on most rows and the letter was written from the profile
+    alone.
+
+    The risk in widening it is the agent reading its own previous letters
+    back in as her voice, so anything the agent writes itself is excluded by
+    name regardless of what the include list says.
     """
-    wanted = [h.lower() for h in CONFIG["cover_letter"].get("draft_headings", [])]
+    cfg = CONFIG["cover_letter"]
+    wanted = [h.lower() for h in cfg.get("draft_headings", [])]
+    skip = [h.lower() for h in cfg.get("agent_headings", [])]
     if not wanted:
         return ""
     chunks, keeping = [], False
     for line in (body or "").splitlines():
-        heading = re.match(r"^#{1,3}\s+(.*)$", line)
+        heading = re.match(r"^#{1,6}\s+(.*)$", line)
         if heading:
             label = heading.group(1).strip().lower()
-            keeping = any(w in label for w in wanted)
+            mine = "✍" in label or any(s in label for s in skip)
+            keeping = (not mine) and any(w in label for w in wanted)
             continue
         if keeping and line.strip():
             chunks.append(line.strip())
@@ -279,11 +289,20 @@ def cover_letters(db, rows, profile, only_page=None):
             print(f"  could not draft a letter for {company}")
             continue
 
-        brand = branding.brand_for(row.get("website") or job.get("website") or "", company)
+        site = row.get("website") or job.get("website") or ""
+        if not site:
+            site = branding.find_website(company, row.get("url") or "", posting)
+            if site:
+                print(f"  [Letter] found {company}'s site: {site}")
+                db.update_properties(row["id"], {"Website": {"url": site}})
+        brand = branding.brand_for(site, company)
         sender = letter_pdf.sender_for(row.get("location") or "", profile)
         print(f"  [Letter] {company}: accent {brand['accent']}, "
               f"{'serif' if brand['serif'] else 'sans'} ({brand.get('source')}); "
               f"{sender['region'].upper()} contact details")
+        sources.annotate("notice", f"Letter for {company}: {brand.get('source')}, "
+                                   f"accent {brand['accent']}, "
+                                   f"{'used your notes' if notes else 'no notes of yours on the row'}")
         pdf_path = attached = None
         try:
             pdf_path = letter_pdf.build_letter_pdf(
