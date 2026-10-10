@@ -350,11 +350,20 @@ def cover_letters(db, rows, profile, only_page=None):
     """
     cfg = CONFIG["cover_letter"]
     trigger = CONFIG["notion"]["cover_letter_trigger"]
-    todo = [r for r in rows if trigger in (r.get("next_action") or [])]
+    ticked = [r for r in rows if trigger in (r.get("next_action") or [])]
+    todo = ticked
     if only_page:
-        todo = [r for r in todo if r["id"].replace("-", "") == only_page.replace("-", "")]
+        want = only_page.replace("-", "").strip()
+        todo = [r for r in todo if r["id"].replace("-", "") == want]
         if not todo:
-            print(f"  [Cover letter] {only_page} is not ticked for a letter; nothing to do")
+            named = [r for r in rows if r["id"].replace("-", "") == want]
+            why = ("that row is not ticked for a letter" if named
+                   else "no row on your database has that id")
+            sources.annotate("warning", f"No letter written: {why}. {len(ticked)} row(s) are "
+                                        f"ticked for a letter in total.")
+            print(f"  [Cover letter] {only_page}: {why}")
+    elif not ticked:
+        print("  [Cover letter] nothing ticked")
     count = 0
     for row in todo:
         company = row.get("company") or ""
@@ -365,6 +374,9 @@ def cover_letters(db, rows, profile, only_page=None):
         posting = job.get("description") or body
         notes = her_draft(body)
         if len(posting) < 200 and not notes:
+            sources.annotate("warning", f"No letter for {company}: the posting could not be "
+                                        f"read ({len(posting)} characters) and the row has no "
+                                        "notes of yours.")
             db.append_blocks(row["id"], [callout(
                 f"{LETTER_MARKER} not possible yet: the agent couldn't read the posting and "
                 f"found no notes of yours. Paste the job description into this page, or write "
@@ -378,6 +390,9 @@ def cover_letters(db, rows, profile, only_page=None):
             her_notes=notes or "(she has not written anything herself for this role)")
         out = scoring.parse_json(scoring.ask(settings.MODEL_DEEP, system, user, 2000))
         if not isinstance(out, dict) or not out.get("letter"):
+            sources.annotate("warning", f"No letter for {company}: the model did not return one. "
+                                        f"Posting {len(posting)} characters, "
+                                        f"{'notes found' if notes else 'no notes'}.")
             print(f"  could not draft a letter for {company}")
             continue
 
