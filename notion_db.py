@@ -216,6 +216,7 @@ class NotionDB:
                 g = lambda key: self._plain(props.get(P.get(key, "")))
                 rows.append({
                     "id": page["id"], "created": page.get("created_time", ""),
+                    "last_edited": page.get("last_edited_time", ""),
                     "company": self._plain(props.get(self.title_prop)) or "",
                     "title": g("job_title") or "", "url": g("link") or "",
                     "status": g("status"), "score": g("score"), "date_found": g("date_found"),

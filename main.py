@@ -6,6 +6,7 @@ Modes
   next      move the next N best rows from Queue to Suggested
   patterns  write the monthly patterns report now
   letters   only the cover letters, optionally for one row (--page <id>)
+  quiet     archive applications that went quiet (add --dry-run to preview)
   mailcheck test the Gmail connection and list what it can see, nothing else
   note      add feedback to your Notion profile page (--note "point one | point two")
 
@@ -342,7 +343,7 @@ def add_profile_note(db, note: str):
 def main():
     ap = argparse.ArgumentParser(description="Phaedra's job agent")
     ap.add_argument("--mode", default="daily",
-                    choices=["daily", "light", "letters", "next", "patterns", "note", "mailcheck"])
+                    choices=["daily", "light", "letters", "quiet", "next", "patterns", "note", "mailcheck"])
     ap.add_argument("--count", type=int, default=10, help="rows to promote in mode 'next'")
     ap.add_argument("--note", default="", help="feedback for mode 'note'; separate points with |")
     ap.add_argument("--page", default="", help="one Notion page id, for mode 'letters'")
@@ -373,12 +374,17 @@ def main():
         writer.patterns_report(db, rows, profile)
         return
 
+    if args.mode == "quiet":
+        writer.archive_quiet_applications(db, rows, dry_run=args.dry_run)
+        return
+
     if args.mode == "letters":
         writer.cover_letters(db, rows, profile, only_page=args.page or None)
         return
 
     writer.enrich_manual_rows(db, rows, profile, taste)
     writer.cover_letters(db, rows, profile)
+    writer.archive_quiet_applications(db, rows)
     if args.mode == "light":
         return
 

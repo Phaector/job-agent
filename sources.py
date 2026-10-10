@@ -647,6 +647,54 @@ def _mask(address: str) -> str:
     return f"{name[:1]}{'*' * max(len(name) - 1, 0)}@{host}" if host else "(not set)"
 
 
+def mail_replies_since(queries, since_day):
+    """Which of these companies have written to her since a given date.
+
+    queries: list of (key, domain, company_name). The domain is matched
+    against the sender; where a row has no website, the company name is
+    matched anywhere in the message instead, which is looser but catches a
+    reply sent through a recruiting platform.
+
+    Returns the set of keys that have mail. On any failure it returns every
+    key, so that a mail problem can never be read as "nobody replied" by
+    something that archives on silence.
+    """
+    all_keys = {k for k, _d, _n in queries}
+    if not queries:
+        return set()
+    if not (settings.GMAIL_ADDRESS and settings.GMAIL_APP_PASSWORD):
+        print("  [Replies] No Gmail credentials, so no application is treated as silent")
+        return all_keys
+    since = f"{since_day.day:02d}-{MONTHS[since_day.month - 1]}-{since_day.year}"
+    found = set()
+    try:
+        box = imaplib.IMAP4_SSL("imap.gmail.com", timeout=IMAP_TIMEOUT)
+        box.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
+        mailbox = _all_mail_box(box)
+        if box.select(mailbox, readonly=True)[0] != "OK":
+            box.select("INBOX", readonly=True)
+        for key, domain, name in queries:
+            term = f'FROM "{domain}"' if domain else f'TEXT "{_imap_quote(name)}"'
+            if not domain and len(clean(name)) < 4:
+                found.add(key)          # too short to match safely, so assume a reply
+                continue
+            status, data = box.search(None, f"(SINCE {since} {term})")
+            if status != "OK":
+                found.add(key)          # a search we cannot trust must not archive
+                continue
+            if data and data[0]:
+                found.add(key)
+        box.logout()
+    except (imaplib.IMAP4.error, OSError) as e:
+        print(f"  [Replies] Could not read Gmail ({e}), so no application is treated as silent")
+        return all_keys
+    return found
+
+
+def _imap_quote(text: str) -> str:
+    return clean(text).replace("\\", "").replace('"', "")
+
+
 def _all_mail_box(box) -> str:
     """The All Mail folder, whatever this account's language calls it.
 

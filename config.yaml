@@ -83,6 +83,20 @@ cover_letter:
     max_css_bytes: 400000
 
 # ---------------------------------------------------------------------
+# QUIET APPLICATIONS: a row you applied to, untouched for this long, with
+# no email from the company in that time, is moved to Archived. Silence is
+# only read as silence when the mailbox was actually read: if Gmail cannot
+# be reached, every company counts as having replied and nothing moves.
+# Note that any edit to the row, including one the agent makes, restarts
+# the clock.
+# ---------------------------------------------------------------------
+archive_quiet:
+  enabled: false                 # preview with: python main.py --mode quiet --dry-run
+  after_days: 14
+  statuses: [Applied]            # only these are ever archived
+  archive_status: Archived
+
+# ---------------------------------------------------------------------
 # LIMITS
 # ---------------------------------------------------------------------
 limits:
@@ -104,11 +118,12 @@ limits:
   taste_examples_each: 20        # yes/no examples the scorer sees
 
 weights:                         # must add up to 1.0
-  skills_fit: 0.30
+  skills_fit: 0.27
   direction_fit: 0.20
   growth_onboarding: 0.15
-  taste_match: 0.15
-  feasibility: 0.10
+  taste_match: 0.08              # halved: every seed example is a US company, so this
+                                 # quietly rewarded US-shaped roles over Belgian ones
+  feasibility: 0.20              # doubled: a role she cannot actually get is worth nothing
   freshness: 0.10
 
 # ---------------------------------------------------------------------

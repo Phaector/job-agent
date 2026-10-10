@@ -95,7 +95,11 @@ check(filters.matches_existing(job("Client Success Coordinator", company="WGSN I
 # ── Scoring maths ──
 sub = {"skills_fit": 8, "direction_fit": 9, "growth_onboarding": 6, "taste_match": 8, "feasibility": 7}
 total = scoring.compute_total(sub, {"posted_at": TODAY})
-check(total == round(8 * .3 + 9 * .2 + 6 * .15 + 8 * .15 + 7 * .1 + 10 * .1, 1), f"total {total}")
+_w = scoring.CONFIG["weights"]          # read the live weights, so tuning them never breaks this
+_expected = round(sum(sub[k] * _w[k] for k in sub) + 10 * _w["freshness"], 1)
+check(total == _expected, f"total {total} should be {_expected}")
+check(round(sum(_w.values()), 3) == 1.0, f"the weights add up to 1.0 ({sum(_w.values())})")
+check(_w["feasibility"] > _w["taste_match"], "being hireable now outranks resembling past picks")
 check(scoring.parse_json('```json\n{"a": 1}\n```') == {"a": 1}, "parse fenced json")
 check(scoring.parse_json('Here: [{"i":1,"keep":true}]', "array")[0]["keep"], "parse array")
 
@@ -564,6 +568,73 @@ check(not filters.hard_filter(_fu[2])[0], "a Verkoper shop-floor role is dropped
 _off = dict(sources.CONFIG["job_boards"]["fashionunited"], enabled=False)
 sources.CONFIG["job_boards"]["fashionunited"] = _off
 check(sources.search_fashionunited() == [], "the board can be switched off in config")
+
+
+# ── Applications that went quiet ──
+def _row(rid, company, status, days_old, website="", url=""):
+    edited = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days_old)).isoformat()
+    return {"id": rid, "company": company, "title": "Coordinator", "status": status,
+            "last_edited": edited, "website": website, "url": url}
+
+
+check(writer._domain_of({"website": "https://www.christianwijnants.com"}) == "christianwijnants.com",
+      "the company domain is read from its website")
+check(writer._domain_of({"website": "", "url": "https://sspcs.recruitee.com/o/role"}) == "",
+      "an applicant tracking link is not mistaken for the company")
+check(writer._domain_of({"website": "", "url": "https://fashionunited.be/fashion-jobs/x-123"}) == "",
+      "nor is a job board")
+
+
+class _ArchiveDB:
+    def __init__(self):
+        self.status, self.notes = [], []
+
+    def set_status(self, page_id, status):
+        self.status.append((page_id, status))
+        return True
+
+    def append_blocks(self, page_id, blocks):
+        self.notes.append(page_id)
+        return True
+
+
+_rows = [
+    _row("old-silent", "Christian Wijnants", "Applied", 30, website="https://christianwijnants.com"),
+    _row("old-replied", "BrightAnalytics", "Applied", 30, website="https://brightanalytics.eu"),
+    _row("recent", "Les Jumelles", "Applied", 3, website="https://lesjumelles.be"),
+    _row("not-applied", "Comme ça", "To Apply", 60, website="https://commeca.be"),
+    _row("interviewed", "Suspicious Antwerp", "Interviewed", 60, website="https://suspiciousantwerp.com"),
+]
+writer.CONFIG["archive_quiet"] = {"enabled": True, "after_days": 14,
+                                  "statuses": ["Applied"], "archive_status": "Archived"}
+_real_replies = sources.mail_replies_since
+sources.mail_replies_since = lambda queries, since: {"old-replied"}
+try:
+    _db = _ArchiveDB()
+    writer.archive_quiet_applications(_db, _rows)
+    _archived = {pid for pid, _s in _db.status}
+    check(_archived == {"old-silent"}, f"only the silent, stale application is archived ({_archived})")
+    check(_db.status[0][1] == "Archived", "it is set to Archived")
+    check(_db.notes == ["old-silent"], "and a note says why, so it can be undone")
+
+    # A mail failure reports every company as having replied; nothing may move.
+    sources.mail_replies_since = lambda queries, since: {k for k, _d, _n in queries}
+    _db2 = _ArchiveDB()
+    writer.archive_quiet_applications(_db2, _rows)
+    check(_db2.status == [], "when the mailbox cannot be read, nothing is archived")
+
+    # The preview writes nothing at all. With no replies, both stale ones qualify.
+    sources.mail_replies_since = lambda queries, since: set()
+    _db3 = _ArchiveDB()
+    check(writer.archive_quiet_applications(_db3, _rows, dry_run=True) == 2,
+          "the preview counts both stale applications when none replied")
+    check(_db3.status == [] and _db3.notes == [], "the preview changes nothing")
+finally:
+    sources.mail_replies_since = _real_replies
+    writer.CONFIG["archive_quiet"] = {"enabled": False, "after_days": 14,
+                                      "statuses": ["Applied"], "archive_status": "Archived"}
+check(writer.archive_quiet_applications(_ArchiveDB(), _rows) == 0, "switched off, it does nothing")
+check(sources.mail_replies_since([], dt.date.today()) == set(), "no candidates means no mail check")
 
 
 print(f"All {passed} offline checks passed.")

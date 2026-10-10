@@ -107,6 +107,72 @@ def enrich_manual_rows(db, rows, profile, taste):
     return done
 
 
+# ─── Applications that went quiet ────────────────────────────────────────────
+def _domain_of(row) -> str:
+    for field in ("website", "url"):
+        raw = row.get(field) or ""
+        host = re.sub(r"^https?://(www\.)?", "", raw).split("/")[0].lower()
+        # A link to an applicant tracking system says nothing about who would reply.
+        if host and not any(ats in host for ats in (
+                "recruitee", "greenhouse", "lever.co", "workable", "ashbyhq", "teamtailor",
+                "myworkday", "adzuna", "linkedin", "indeed", "fashionunited", "smartrecruiters",
+                "icims", "jobvite", "rippling", "personio", "jobtoolz", "bamboohr")):
+            return host
+    return ""
+
+
+def archive_quiet_applications(db, rows, dry_run=False):
+    """Archive applications that have sat untouched with no reply.
+
+    Silence is only taken as silence when the mail was actually read: if
+    Gmail cannot be reached, mail_replies_since reports every company as
+    having replied, and nothing is archived.
+    """
+    cfg = CONFIG.get("archive_quiet") or {}
+    if not cfg.get("enabled") and not dry_run:
+        return 0
+    days = int(cfg.get("after_days", 14))
+    watched = cfg.get("statuses") or ["Applied"]
+    target = cfg.get("archive_status", "Archived")
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+
+    stale = []
+    for row in rows:
+        if row.get("status") not in watched:
+            continue
+        try:
+            edited = dt.datetime.fromisoformat((row.get("last_edited") or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if edited < cutoff:
+            stale.append(row)
+    if not stale:
+        return 0
+
+    since_day = (cutoff - dt.timedelta(days=2)).date()      # a little slack around the window
+    queries = [(r["id"], _domain_of(r), r.get("company") or "") for r in stale]
+    replied = sources.mail_replies_since(queries, since_day)
+
+    quiet = [r for r in stale if r["id"] not in replied]
+    print(f"[Quiet] {len(stale)} application(s) untouched for {days}+ days, "
+          f"{len(stale) - len(quiet)} had a reply, {len(quiet)} to archive")
+    for row in quiet:
+        label = f"{row.get('company')} · {row.get('title') or ''}".strip(" ·")
+        if dry_run:
+            print(f"    [preview] would archive: {label}")
+            continue
+        if db.set_status(row["id"], target):
+            db.append_blocks(row["id"], [callout(
+                f"Archived automatically on {dt.date.today():%d %b %Y}: no change to this row "
+                f"for {days} days and no email from them in that time. Set the status back "
+                f"if that is wrong.")])
+            print(f"    archived: {label}")
+    if quiet and not dry_run:
+        sources.annotate("notice", f"Archived {len(quiet)} quiet application(s): "
+                                   + "; ".join((r.get('company') or '?') for r in quiet[:10]))
+    return len(quiet)
+
+
 # ─── Cover letters ────────────────────────────────────────────────────────────
 LETTER_SYSTEM = """You write cover letter drafts for Phaedra, using ONLY facts from her profile.
 
