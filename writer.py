@@ -2,10 +2,14 @@
 
 - enrich_manual_rows(): you paste a link or a job description, the agent fills in the rest.
 - cover_letters(): tick "Cover Letter" under Next Action, get a draft.
+- sync_application_replies(): companies' answers in Gmail update the matching row.
 - patterns_report(): once a month, what your yes/no choices say.
 """
 import datetime as dt
+import difflib
+import hashlib
 import re
+import unicodedata
 
 import branding
 import filters
@@ -13,7 +17,7 @@ import letter_pdf
 import scoring
 import settings
 import sources
-from notion_db import bullet, callout, heading, job_blocks, paragraph
+from notion_db import bullet, callout, heading, job_blocks, paragraph, rt
 from settings import CONFIG
 
 ST = CONFIG["notion"]["statuses"]
@@ -271,6 +275,276 @@ def archive_quiet_applications(db, rows, dry_run=False):
     if quiet and not dry_run:
         sources.annotate("notice", f"Archived {len(quiet)} quiet application(s): {listed}")
     return len(quiet)
+
+
+# ─── Replies to her applications ──────────────────────────────────────────────
+REPLY_SYSTEM = """You sort emails in the inbox of Phaedra Imschoot, a recent graduate applying \
+for jobs in New York and Belgium. Decide whether an email is a company's answer to one of \
+her job applications, and if so what kind.
+
+kind, exactly one of:
+- "rejection": they will not move forward with her.
+- "interview_invite": they want to talk: an invitation to book, confirm or pick a time for a \
+call or interview, or a request to call them back.
+- "interview_scheduled": a call or interview at a specific date and time is confirmed.
+- "next_step": any other step forward: an assessment, a test, a form, a request for documents.
+- "offer": a job offer.
+- "confirmation": only confirms her application arrived or was sent (job board receipts, \
+"we received your application", "application sent to ..."). Nothing has been decided.
+- "other": anything else: job alerts, newsletters, marketing, login codes, account emails.
+
+company: the employer she applied to, not the job board, recruiting platform or agency that \
+sent the email (e.g. FashionUnited or Handshake are never the company). "" if unknown.
+job_title: the role, if the email names it, else "".
+interview_at: for interview_scheduled only, ISO 8601 with the timezone offset the email gives \
+(New York or Brussels), else "".
+summary: one short sentence in English on what they said or ask her to do. No praise, no \
+filler.
+
+Return ONLY JSON: {"kind": "...", "company": "...", "job_title": "...", \
+"interview_at": "...", "summary": "..."}"""
+
+REPLY_KINDS = {"rejection", "interview_invite", "interview_scheduled", "next_step", "offer"}
+REPLY_LABEL = {"rejection": "Rejection", "interview_invite": "Interview invitation",
+               "interview_scheduled": "Interview scheduled", "next_step": "Next step",
+               "offer": "Offer"}
+REPLY_EMOJI = {"rejection": "📪", "interview_invite": "📞", "interview_scheduled": "📅",
+               "next_step": "➡️", "offer": "🎉"}
+REPLY_REF = "Gmail ref "
+EARLY_STATUSES = {None, "", "Suggested", "Queue", "To Apply", "Remembered", "Archived",
+                  "Not interested"}
+
+
+def _fold(text: str) -> str:
+    """Lower case, accents and punctuation off, legal suffixes dropped."""
+    raw = unicodedata.normalize("NFKD", text or "")
+    raw = "".join(c for c in raw if not unicodedata.combining(c))
+    return filters.norm_company(raw.replace("’", "'").replace("'", ""))
+
+
+def _same_company(a: str, b: str) -> bool:
+    fa, fb = _fold(a), _fold(b)
+    if not fa or not fb:
+        return False
+    if fa == fb:
+        return True
+    ta, tb = fa.split(), fb.split()
+    # "Christian Wijnants" vs "Christian Wijnants Antwerp", "Mantu" vs "Amaris Consulting" is not one.
+    if len(fa) >= 4 and len(fb) >= 4 and (set(ta) <= set(tb) or set(tb) <= set(ta)):
+        return True
+    # Typos she makes by hand: WSGN for WGSN, Vivrellles for Vivrelle.
+    return len(fa) >= 5 and difflib.SequenceMatcher(None, fa, fb).ratio() >= 0.85
+
+
+def _sender_domain(address: str) -> str:
+    host = (address or "").rpartition("@")[2].lower()
+    parts = host.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def match_reply(rows, company: str, title: str, sender: str = ""):
+    """The row a reply belongs to, or (None, candidates) when it cannot be told.
+
+    Company first (by name, or by the sender's domain against the row's own
+    website), then the role. With several rows at one company and no role to
+    go on, the reply is not guessed onto one of them.
+    """
+    domain = _sender_domain(sender)
+    cands = [r for r in rows
+             if _same_company(company, r.get("company") or "")
+             or (domain and _domain_of(r) and _sender_domain("x@" + _domain_of(r)) == domain)]
+    if not cands:
+        return None, []
+    if len(cands) == 1:
+        return cands[0], cands
+    if title:
+        ranked = sorted(cands, key=lambda r: -filters.title_similarity(title, r.get("title") or ""))
+        best = filters.title_similarity(title, ranked[0].get("title") or "")
+        second = filters.title_similarity(title, ranked[1].get("title") or "")
+        if best >= 0.3 and best > second:
+            return ranked[0], cands
+    # Several rows, one of which she actually applied to: that is the one.
+    applied = [r for r in cands if r.get("status") not in EARLY_STATUSES]
+    if len(applied) == 1:
+        return applied[0], cands
+    return None, cands
+
+
+def _ref(mail: dict) -> str:
+    """A short, stable tag for an email, written into the note so it is never added twice."""
+    return REPLY_REF + hashlib.sha1(mail["key"].encode()).hexdigest()[:10]
+
+
+def classify_reply(mail: dict):
+    text = (f"FROM: {mail.get('sender_name')} <{mail.get('sender')}>\n"
+            f"DATE: {mail.get('date')}\nSUBJECT: {mail.get('subject')}\n\n"
+            f"{(mail.get('body') or '')[:4000]}")
+    return scoring.parse_json(scoring.ask(settings.MODEL_SCREEN, REPLY_SYSTEM, text, 400))
+
+
+def _reply_block(mail: dict, info: dict):
+    kind = info["kind"]
+    who = mail.get("sender_name") or mail.get("sender") or "them"
+    parts = [rt(f"{REPLY_LABEL[kind]} · {mail['date']} · from {who}", bold=True),
+             rt(f"\n{info.get('summary') or mail.get('subject') or ''}")]
+    if mail.get("link"):
+        parts += [rt("\n"), rt("Open the email", link=mail["link"])]
+    parts.append(rt(f"   ({_ref(mail)})"))
+    return {"object": "block", "type": "callout",
+            "callout": {"rich_text": parts,
+                        "icon": {"type": "emoji", "emoji": REPLY_EMOJI[kind]}}}
+
+
+def _reply_changes(row: dict, info: dict):
+    """New status and Next Action for a row, given a reply. Never moves a row back."""
+    kind, status = info["kind"], row.get("status")
+    actions = list(row.get("next_action") or [])
+    new_status = None
+    if status == "Accepted":
+        return None, actions
+    if kind == "rejection":
+        new_status = "Rejected" if status != "Rejected" else None
+        actions = [a for a in actions if a not in ("Waiting", "First Call", "Prepare Interview")]
+    elif kind == "offer":
+        new_status = "Offer" if status != "Offer" else None
+        actions = actions + ["Decide"]
+    else:
+        if status in EARLY_STATUSES:
+            new_status = "Applied"
+        actions = [a for a in actions if a != "Waiting"]
+        actions.append({"interview_invite": "First Call", "interview_scheduled": "Prepare Interview",
+                        "next_step": "Follow up"}[kind])
+    seen, ordered = set(), []
+    for a in actions:
+        if a not in seen:
+            seen.add(a)
+            ordered.append(a)
+    return new_status, ordered
+
+
+def _is_person(address: str) -> bool:
+    local = (address or "").partition("@")[0].lower()
+    return bool(local) and not re.search(r"no-?reply|do-?not-?reply|notification|mailer|"
+                                         r"careers?@|jobs?@|recruit|talent|hr@|hiring@|"
+                                         r"^job\.|^e\+", local + "@")
+
+
+def _reply_props(db, row, info, mail, new_status, actions):
+    props = {}
+    if new_status:
+        db._set(props, "status", ("select", "status"), db._choice("status", new_status))
+    if actions != list(row.get("next_action") or []):
+        db._set(props, "next_action", ("multi_select",),
+                {"multi_select": [{"name": a} for a in actions]})
+    when = (info.get("interview_at") or "").strip()
+    if info["kind"] == "interview_scheduled" and re.match(r"\d{4}-\d{2}-\d{2}", when):
+        is_time = "T" in when
+        db._set(props, "interview_date", ("date",), {"date": {"start": when if is_time else when[:10]}})
+    if not row.get("contact") and _is_person(mail.get("sender")):
+        db._set(props, "contact", ("email",), {"email": mail["sender"]})
+    return props
+
+
+def sync_application_replies(db, rows, dry_run=False):
+    """Read companies' answers to her applications in Gmail and record them in Notion.
+
+    Only real answers count: a rejection, an invitation to talk, a scheduled
+    interview, another step forward or an offer. Receipts ("we received your
+    application", "application sent") are left alone. The matching row gets
+    its Status and Next Action updated and a note with a link to the email;
+    an answer to an application that has no row yet gets a new one.
+    """
+    cfg = CONFIG.get("replies") or {}
+    if not cfg.get("enabled") and not dry_run:
+        return 0
+    if not settings.ANTHROPIC_API_KEY:
+        print("  [Replies] No ANTHROPIC_API_KEY, skipping")
+        return 0
+    state = sources.read_reply_state()
+    mails = sources.application_emails(cfg.get("gmail_query", ""), cfg.get("lookback_days", 3),
+                                       skip_keys=state, max_emails=cfg.get("max_emails", 30))
+    if mails is None:
+        sources.annotate("warning", "Could not read Gmail, so no replies to applications "
+                                    "were checked this run.")
+        return 0
+    if not mails:
+        print("[Replies] No new emails to check")
+        return 0
+    print(f"[Replies] Checking {len(mails)} new email(s)")
+    today = dt.date.today().isoformat()
+    done, unclear = [], []
+    for mail in mails:
+        info = classify_reply(mail)
+        if not isinstance(info, dict) or not info.get("kind"):
+            print(f"    could not sort: {mail['subject'][:70]} (tried again next run)")
+            continue
+        state[mail["key"]] = today
+        kind = info["kind"]
+        if kind not in REPLY_KINDS:
+            continue
+        company = (info.get("company") or "").strip()
+        title = (info.get("job_title") or "").strip()
+        row, cands = match_reply(rows, company, title, mail.get("sender"))
+        label = f"{company or '?'}{f' · {title}' if title else ''}"
+
+        if row is None and cands:
+            # Several rows at this company and nothing to tell them apart: a note
+            # on each beats a status change on the wrong one.
+            for c in cands:
+                if _ref(mail) not in db.page_text(c["id"]):
+                    db.append_blocks(c["id"], [_reply_block(mail, info), callout(
+                        "This reply could be about another application at this company too, "
+                        "so the status was not changed. Update it if it is about this one.", "❔")])
+            unclear.append(f"{REPLY_LABEL[kind]} from {label}")
+            print(f"    {REPLY_LABEL[kind]}: {label} -> {len(cands)} possible rows, noted on each")
+            continue
+
+        if row is None:
+            if not cfg.get("create_missing_rows", True) or not company:
+                unclear.append(f"{REPLY_LABEL[kind]} from {label} (no row)")
+                continue
+            new_status, actions = _reply_changes({"status": "Applied"}, info)
+            props = {db.title_prop: {"title": [rt(company)]}}
+            db._set(props, "job_title", ("rich_text",), {"rich_text": [rt(title)]})
+            db._set(props, "status", ("select", "status"),
+                    db._choice("status", new_status or "Applied"))
+            db._set(props, "type", ("select", "status"), db._choice("type", "Job"))
+            db._set(props, "date_found", ("date",), {"date": {"start": mail["date"]}})
+            props.update(_reply_props(db, {"next_action": ["Waiting"]}, info, mail, None, actions))
+            page = db.create_row(props, [_reply_block(mail, info)], label=label)
+            if page:
+                rows.append({"id": page, "company": company, "title": title,
+                             "status": new_status or "Applied", "next_action": actions,
+                             "last_edited": dt.datetime.now(dt.timezone.utc).isoformat()})
+                done.append(f"{REPLY_LABEL[kind]} · {label} (new row)")
+                print(f"    {REPLY_LABEL[kind]}: {label} -> new row")
+            continue
+
+        if _ref(mail) in db.page_text(row["id"]):
+            continue                    # recorded on an earlier run
+        new_status, actions = _reply_changes(row, info)
+        props = _reply_props(db, row, info, mail, new_status, actions)
+        if props:
+            db.update_properties(row["id"], props)
+        db.append_blocks(row["id"], [_reply_block(mail, info)])
+        # Keep this run's picture current, so the quiet-application check that
+        # follows sees the new status rather than the old one.
+        row["status"] = new_status or row.get("status")
+        row["next_action"] = actions
+        row["last_edited"] = dt.datetime.now(dt.timezone.utc).isoformat()
+        moved = f" ({row.get('status')})" if new_status else ""
+        done.append(f"{REPLY_LABEL[kind]} · {row.get('company')}{moved}")
+        print(f"    {REPLY_LABEL[kind]}: {row.get('company')} · {row.get('title') or ''}{moved}")
+
+    if not dry_run:
+        sources.write_reply_state(state)
+    if done:
+        sources.annotate("notice", f"Recorded {len(done)} repl(ies) to your applications: "
+                                   + "; ".join(done[:12]))
+    if unclear:
+        sources.annotate("warning", "Replies that could not be matched to one row: "
+                                    + "; ".join(unclear[:8]))
+    return len(done)
 
 
 # ─── Cover letters ────────────────────────────────────────────────────────────

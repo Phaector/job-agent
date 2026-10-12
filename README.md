@@ -14,6 +14,7 @@ Finds jobs every morning, scores them against your profile with Claude, and puts
 - Rows you added with only a link get filled in and scored.
 - Rows with no link get the same treatment when you paste the posting into the row's page under a **Job Description** heading (handy for Handshake and LinkedIn, which need a login).
 - Rows where you ticked **Cover Letter** under Next Action get a draft in the page.
+- Companies' answers to your applications are read from Gmail and recorded in Notion (see below).
 
 **On the 1st of each month:** a patterns report appears under your profile page.
 
@@ -101,6 +102,18 @@ python main.py --dry-run        # full run that prints instead of writing to Not
 - Or: Actions → Run workflow → mode `next` (moves the next 10 to Suggested).
 - Or: mode `daily` for a fresh search.
 
+**Replies from companies (every 2 hours, needs the Gmail secrets):**
+- Recent emails that look like an answer to an application are sorted by the cheap Claude model. Receipts ("we received your application", Handshake's "application sent") are ignored; only real answers count.
+- **Rejection** → Status **Rejected**, and Waiting / First Call / Prepare Interview are taken off Next Action.
+- **Invitation to talk** → **First Call** under Next Action; a row that was still To Apply, Suggested or Queue moves to **Applied**.
+- **Interview at a set time** → **Prepare Interview**, and **Interview Date** is filled in.
+- **Other step** (assessment, form, documents) → **Follow up**.
+- **Offer** → Status **Offer** and **Decide**.
+- Each one adds a note to the row with a one-line summary and a link to the email. If the recruiter wrote from a personal address and **Contact** is empty, that address is saved.
+- A row is never moved back: an Accepted row is left alone, and an Interviewed row stays Interviewed.
+- An answer for an application with no row yet gets a new row. When a company has several rows and the email doesn't name the role, the note goes on each and no status changes.
+- Which emails are looked at is the Gmail search under `replies.gmail_query` in `config.yaml`. Preview without changing anything: Actions → Run workflow → mode `replies`, tick dry run.
+
 **Repeats:** a job that has been in Notion once is never added again. Queue rows older than 14 days go to Notion's trash (recoverable for 30 days).
 
 ## Tuning (config.yaml)
@@ -114,6 +127,7 @@ python main.py --dry-run        # full run that prints instead of writing to Not
 | Search terms per country | `search` |
 | Company boards to watch | `watchlist` |
 | Newsletters and alert emails to read | `newsletter.sources` |
+| Which emails count as replies to applications | `replies` |
 
 Your directions and background live in the Notion profile page (or `profile.md`).
 

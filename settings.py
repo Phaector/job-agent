@@ -35,5 +35,6 @@ MODEL_DEEP = CONFIG["models"]["deep"]
 
 STATE_FILE = ROOT / "state" / "seen.json"
 MAIL_STATE_FILE = ROOT / "state" / "seen_emails.json"        # newsletter emails already read
+REPLY_STATE_FILE = ROOT / "state" / "reply_emails.json"      # replies to applications already handled
 PROFILE_FILE = ROOT / "profile.md"
 LETTER_DIR = ROOT / "state" / "letters"                      # rendered PDFs, not committed

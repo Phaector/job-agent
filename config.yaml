@@ -29,6 +29,8 @@ notion:
     why_not: Why not            # optional text field: a few words when you mark "Not interested"
     track: Track                # optional select field: PR / Comms, Fashion business, Tech business, Fashion-tech, Wildcard
                                 # (new options are created in Notion automatically the first time one is used)
+    contact: Contact            # optional email field: filled from a company's reply when empty
+    interview_date: Interview Date   # optional date field: filled when a reply confirms an interview time
   statuses:
     suggested: Suggested
     queue: Queue
@@ -134,6 +136,26 @@ archive_quiet:
   after_days: 14
   statuses: [Applied]            # only these are ever archived
   archive_status: Archived
+
+# Companies answering your applications. Every light run (every 2 hours)
+# reads recent Gmail, sorts each email with the cheap model, and for a real
+# answer (rejection, invitation to talk, scheduled interview, next step,
+# offer) updates the matching row's Status and Next Action and adds a note
+# with a link to the email. Receipts like "application received" are ignored.
+# An answer for an application with no row yet gets a new row.
+# Preview with: python main.py --mode replies --dry-run
+replies:
+  enabled: true
+  lookback_days: 3               # covers a few missed runs; each email is handled once
+  max_emails: 30
+  create_missing_rows: true
+  # Written exactly like a Gmail search; "newer_than:Nd" is added in front.
+  gmail_query: >-
+    -from:me -category:promotions -category:social
+    -from:(jobalerts-noreply@linkedin.com OR aiapplymail.com OR studysmarter.de OR substack.com)
+    (application OR applying OR applied OR candidacy OR candidature OR sollicitatie
+    OR kandidatuur OR interview OR sollicitatiegesprek OR entretien OR "next steps"
+    OR "your profile" OR "your resume" OR "your CV" OR "job offer" OR "offer letter")
 
 # ---------------------------------------------------------------------
 # LIMITS

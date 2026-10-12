@@ -199,6 +199,8 @@ class NotionDB:
             return prop.get("number")
         if t == "date":
             return (prop.get("date") or {}).get("start")
+        if t == "email":
+            return prop.get("email")
         return None
 
     def all_rows(self):
@@ -224,6 +226,7 @@ class NotionDB:
                     "next_action": g("next_action") or [], "why_not": g("why_not") or "",
                     "track": g("track"), "location": g("location"), "type": g("type"),
                     "deadline": g("deadline"), "website": g("website") or "",
+                    "contact": g("contact") or "", "interview_date": g("interview_date"),
                 })
             if not data.get("has_more"):
                 break
@@ -352,6 +355,16 @@ class NotionDB:
         page = self._req("POST", "/pages", payload)
         if page and len(blocks) > 100:
             self.append_blocks(page["id"], blocks[100:])
+        return page["id"] if page else None
+
+    def create_row(self, props: dict, blocks: list, label: str = ""):
+        """A new row from ready-made properties, for rows that are not job postings."""
+        if self.dry_run:
+            print(f"    [dry run] would add a row: {label or list(props)}")
+            return "dry-run"
+        payload = {"parent": {"database_id": settings.NOTION_DATABASE_ID},
+                   "properties": props, "children": blocks[:100]}
+        page = self._req("POST", "/pages", payload)
         return page["id"] if page else None
 
     def update_properties(self, page_id, props):

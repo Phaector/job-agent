@@ -972,4 +972,191 @@ finally:
     writer.CONFIG["company_lookup"] = dict(writer.CONFIG["company_lookup"], enabled=True)
 
 
+# ── Companies answering her applications ──
+for a, b in [("Hermès", "Hermes"), ("Macy's", "Macy’s"), ("Vivrellles", "Vivrelle"),
+             ("Estée Lauder Companies", "The Estee Lauder Companies"), ("Boost", "Boost Company"),
+             ("Christian Wijnants", "CHRISTIAN WIJNANTS")]:
+    check(writer._same_company(a, b), f"{a} is {b}")
+for a, b in [("Amaris Consulting", "Mantu"), ("Accenture", "Datasite"), ("", "Acme"),
+             ("Tapestry", "Kate Spade")]:
+    check(not writer._same_company(a, b), f"{a} is not {b}")
+
+_acc = [
+    {"id": "acc-sn", "company": "Accenture", "title": "ServiceNow Implementation Specialist",
+     "status": "Applied", "next_action": []},
+    {"id": "acc-rm", "company": "Accenture", "title": "Retail Merchandising and Planning – Strategy Consultant",
+     "status": "Applied", "next_action": []},
+    {"id": "acc-open", "company": "Accenture", "title": "Implementation Consultant (Open Application)",
+     "status": "To Apply", "next_action": []},
+    {"id": "wijn", "company": "Christian Wijnants", "title": "Office & Operations Coordinator",
+     "status": "Applied", "next_action": ["Waiting"], "website": "https://christianwijnants.com"},
+]
+_m, _c = writer.match_reply(_acc, "Accenture", "ServiceNow Implementation Specialist")
+check(_m and _m["id"] == "acc-sn", "a reply naming the role finds that row")
+_m, _c = writer.match_reply(_acc, "Accenture", "")
+check(_m is None and len(_c) == 3, "with three rows and no role named, none is guessed")
+_m, _c = writer.match_reply(_acc, "", "", "studio@christianwijnants.com")
+check(_m and _m["id"] == "wijn", "the sender's domain finds the company when its name is missing")
+_m, _c = writer.match_reply(_acc, "Hermès", "Advertising Intern")
+check(_m is None and _c == [], "a company with no row matches nothing")
+
+_ch = writer._reply_changes
+check(_ch({"status": "Applied", "next_action": ["Prepare Interview", "Cover Letter"]},
+          {"kind": "rejection"}) == ("Rejected", ["Cover Letter"]),
+      "a rejection sets Rejected and drops the interview actions")
+check(_ch({"status": "To Apply", "next_action": []}, {"kind": "interview_invite"})
+      == ("Applied", ["First Call"]), "an invitation to talk moves an early row to Applied")
+check(_ch({"status": "Interviewed", "next_action": ["Waiting"]}, {"kind": "interview_scheduled"})
+      == (None, ["Prepare Interview"]), "a later row keeps its status, and Waiting goes")
+check(_ch({"status": "Applied", "next_action": []}, {"kind": "offer"}) == ("Offer", ["Decide"]),
+      "an offer sets Offer")
+check(_ch({"status": "Accepted", "next_action": []}, {"kind": "rejection"})[0] is None,
+      "an accepted job is never moved")
+check(_ch({"status": "Rejected", "next_action": []}, {"kind": "rejection"})[0] is None,
+      "a second rejection changes nothing")
+check(writer._is_person("kwong@mantu.com") and not writer._is_person("noreply@odoo.com")
+      and not writer._is_person("hiring@boostdirectco.com")
+      and not writer._is_person("job.ryovm.3mvogy.legalfly@recruitee-inbox.com"),
+      "only a person's address is saved as the contact")
+
+
+class _ReplyDB:
+    title_prop = "Company"
+    schema = {"Company": "title", "Job Title": "rich_text", "Status": "status",
+              "Type": "select", "Date Found": "date", "Next Action": "multi_select",
+              "Contact": "email", "Interview Date": "date"}
+    _set = notion_db.NotionDB._set
+    _choice = notion_db.NotionDB._choice
+
+    def __init__(self):
+        self.props, self.blocks, self.created, self.text = {}, {}, [], {}
+
+    def update_properties(self, pid, props):
+        self.props[pid] = props
+        return True
+
+    def append_blocks(self, pid, blocks):
+        self.blocks.setdefault(pid, []).extend(blocks)
+        self.text[pid] = self.text.get(pid, "") + " ".join(
+            "".join(p["text"]["content"] for p in b[b["type"]]["rich_text"]) for b in blocks)
+        return True
+
+    def page_text(self, pid):
+        return self.text.get(pid, "")
+
+    def create_row(self, props, blocks, label=""):
+        self.created.append((props, blocks))
+        return f"new-{len(self.created)}"
+
+
+_mails = [
+    {"key": "<rej@x>", "date": "2026-10-08", "sender": "accenture@myworkday.com",
+     "sender_name": "Accenture", "subject": "Update on Your Accenture Application",
+     "body": "...", "link": "https://mail.google.com/mail/u/0/#all/abc"},
+    {"key": "<call@x>", "date": "2026-10-07", "sender": "kwong@mantu.com", "sender_name": "Kate Wong",
+     "subject": "Candidature Business Manager", "body": "...", "link": ""},
+    {"key": "<receipt@x>", "date": "2026-10-12", "sender": "handshake@notifications.joinhandshake.com",
+     "sender_name": "Handshake", "subject": "Application sent to GOGO JEANS", "body": "...", "link": ""},
+    {"key": "<ask@x>", "date": "2026-10-09", "sender": "talent@acme.com", "sender_name": "Acme",
+     "subject": "Your application", "body": "...", "link": ""},
+]
+_answers = {
+    "<rej@x>": {"kind": "rejection", "company": "Accenture",
+                "job_title": "ServiceNow Implementation Specialist", "summary": "Not moving forward."},
+    "<call@x>": {"kind": "interview_scheduled", "company": "Amaris Consulting",
+                 "job_title": "Business Manager", "interview_at": "2026-10-13T11:15:00+02:00",
+                 "summary": "Call booked."},
+    "<receipt@x>": {"kind": "confirmation", "company": "GOGO JEANS", "job_title": "", "summary": ""},
+    "<ask@x>": {"kind": "rejection", "company": "Accenture", "job_title": "", "summary": "No."},
+}
+_reply_rows = [dict(r) for r in _acc]
+_real = (sources.application_emails, writer.classify_reply, sources.read_reply_state,
+         sources.write_reply_state, writer.settings.ANTHROPIC_API_KEY)
+_saved_state = {}
+sources.application_emails = lambda q, d, skip_keys=(), max_emails=30: [
+    m for m in _mails if m["key"] not in skip_keys]
+writer.classify_reply = lambda mail: _answers[mail["key"]]
+sources.read_reply_state = lambda: dict(_saved_state)
+sources.write_reply_state = lambda st: _saved_state.update(st)
+writer.settings.ANTHROPIC_API_KEY = "test"
+writer.CONFIG["replies"] = dict(writer.CONFIG.get("replies") or {}, enabled=True)
+try:
+    _rdb = _ReplyDB()
+    _n = writer.sync_application_replies(_rdb, _reply_rows)
+    check(_n == 2, f"a rejection and a booked call are recorded, the receipt is not ({_n})")
+    check(_rdb.props["acc-sn"]["Status"] == {"status": {"name": "Rejected"}},
+          "the rejected application is set to Rejected")
+    check(_reply_rows[0]["status"] == "Rejected", "and this run's rows see it too")
+    check("acc-sn" in _rdb.blocks and "Open the email" in _rdb.text["acc-sn"],
+          "a note with a link to the email is added")
+    check(len(_rdb.created) == 1, "the call for an application with no row makes a new row")
+    _np = _rdb.created[0][0]
+    check(_np["Company"]["title"][0]["text"]["content"] == "Amaris Consulting"
+          and _np["Status"] == {"status": {"name": "Applied"}}
+          and _np["Next Action"] == {"multi_select": [{"name": "Prepare Interview"}]}
+          and _np["Interview Date"]["date"]["start"] == "2026-10-13T11:15:00+02:00"
+          and _np["Contact"] == {"email": "kwong@mantu.com"},
+          "with the company, Applied, Prepare Interview, the time and the recruiter's address")
+    check(not any("GOGO" in str(c) for c in _rdb.created), "a receipt never makes a row")
+    check({"acc-rm", "acc-open"} <= set(_rdb.blocks) and "acc-rm" not in _rdb.props,
+          "an Accenture reply naming no role is noted on each row without changing a status")
+    check(set(_saved_state) == {m["key"] for m in _mails}, "every email sorted is remembered")
+
+    _rdb2 = _ReplyDB()
+    check(writer.sync_application_replies(_rdb2, _reply_rows) == 0
+          and not _rdb2.props and not _rdb2.created, "the next run does nothing twice")
+
+    # Gmail unreadable: nothing changes and nothing is remembered.
+    _saved_state.clear()
+    sources.application_emails = lambda *a, **k: None
+    _rdb3 = _ReplyDB()
+    check(writer.sync_application_replies(_rdb3, _reply_rows) == 0 and not _rdb3.props
+          and not _saved_state, "when Gmail cannot be read, nothing changes")
+
+    writer.CONFIG["replies"]["enabled"] = False
+    check(writer.sync_application_replies(_ReplyDB(), _reply_rows) == 0, "it can be switched off")
+finally:
+    (sources.application_emails, writer.classify_reply, sources.read_reply_state,
+     sources.write_reply_state, writer.settings.ANTHROPIC_API_KEY) = _real
+    writer.CONFIG["replies"]["enabled"] = True
+
+class _ReplyIMAP(FakeIMAP):
+    RAW = (b"Message-ID: <r1@hr.example>\r\nFrom: =?utf-8?q?Herm=C3=A8s?= <no-reply@hermes.com>\r\n"
+           b"Date: Sat, 10 Oct 2026 16:58:56 +0200\r\nSubject: =?utf-8?q?Your_application_at_Herm=C3=A8s?=\r\n"
+           b"MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=b\r\n\r\n"
+           b"--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Dear Phaedra,</p><p>We regret.</p>\r\n"
+           b"--b--\r\n")
+    searched = []
+
+    def search(self, charset, *criteria):
+        _ReplyIMAP.searched.append(criteria)
+        return "OK", [b"7 8"]
+
+    def fetch(self, num, spec):
+        if "HEADER.FIELDS" in spec:
+            mid = b"<old@x>" if num == b"7" else b"<r1@hr.example>"
+            return "OK", [(b"x", b"Message-ID: " + mid + b"\r\n\r\n")]
+        return "OK", [(num + b" (X-GM-THRID 1878675253576080500 BODY[] {100}", self.RAW), b")"]
+
+
+sources.imaplib.IMAP4_SSL = _ReplyIMAP
+_real_addr, _real_pw = sources.settings.GMAIL_ADDRESS, sources.settings.GMAIL_APP_PASSWORD
+sources.settings.GMAIL_ADDRESS, sources.settings.GMAIL_APP_PASSWORD = "her@gmail.com", "pw"
+try:
+    _got = sources.application_emails("interview", 3, skip_keys={"<old@x>"})
+    check(_ReplyIMAP.searched[-1] == ("X-GM-RAW", '"newer_than:3d interview"'),
+          f"Gmail is searched with its own syntax ({_ReplyIMAP.searched[-1]})")
+    check(len(_got) == 1 and _got[0]["key"] == "<r1@hr.example>", "an email already handled is skipped")
+    check(_got[0]["subject"] == "Your application at Hermès" and _got[0]["sender"] == "no-reply@hermes.com",
+          f"encoded subject and sender are read ({_got[0]['subject']})")
+    check("We regret" in _got[0]["body"] and "<p>" not in _got[0]["body"], "an HTML-only body is read as text")
+    check(_got[0]["date"] == "2026-10-10" and _got[0]["link"].endswith(f"{1878675253576080500:x}"),
+          "the date and a link to the Gmail thread are kept")
+finally:
+    sources.imaplib.IMAP4_SSL = _real_imap
+    sources.settings.GMAIL_ADDRESS, sources.settings.GMAIL_APP_PASSWORD = _real_addr, _real_pw
+check(sources._gmail_raw('newer_than:3d (interview OR "next steps")')
+      == '"newer_than:3d (interview OR \\"next steps\\")"', "the Gmail search is quoted for IMAP")
+
+
 print(f"All {passed} offline checks passed.")

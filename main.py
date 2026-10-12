@@ -2,11 +2,12 @@
 
 Modes
   daily     full run: your links, cover letters, search, score, push to Notion
-  light     only your links + cover letters (runs every 2 hours)
+  light     your links, cover letters, replies from companies (runs every 2 hours)
   next      move the next N best rows from Queue to Suggested
   patterns  write the monthly patterns report now
   letters   only the cover letters, optionally for one row (--page <id>)
   quiet     archive applications that went quiet (add --dry-run to preview)
+  replies   record companies' answers from Gmail in Notion (add --dry-run to preview)
   mailcheck test the Gmail connection and list what it can see, nothing else
   note      add feedback to your Notion profile page (--note "point one | point two")
 
@@ -374,7 +375,8 @@ def add_profile_note(db, note: str):
 def main():
     ap = argparse.ArgumentParser(description="Phaedra's job agent")
     ap.add_argument("--mode", default="daily",
-                    choices=["daily", "light", "letters", "quiet", "next", "patterns", "note", "mailcheck"])
+                    choices=["daily", "light", "letters", "quiet", "replies", "next", "patterns", "note",
+                             "mailcheck"])
     ap.add_argument("--count", type=int, default=10, help="rows to promote in mode 'next'")
     ap.add_argument("--note", default="", help="feedback for mode 'note'; separate points with |")
     ap.add_argument("--page", default="", help="one Notion page id, for mode 'letters'")
@@ -398,6 +400,10 @@ def main():
         promote_next(db, rows, args.count)
         return
 
+    if args.mode == "replies":         # needs no profile: only reads mail and updates rows
+        writer.sync_application_replies(db, rows, dry_run=db.dry_run)
+        return
+
     profile = load_profile(db)
     taste = scoring.taste_block(rows)
 
@@ -416,6 +422,7 @@ def main():
     writer.enrich_manual_rows(db, rows, profile, taste)
     writer.fill_company_websites(db, rows)
     writer.cover_letters(db, rows, profile)
+    writer.sync_application_replies(db, rows, dry_run=db.dry_run)
     writer.archive_quiet_applications(db, rows)
     if args.mode == "light":
         return

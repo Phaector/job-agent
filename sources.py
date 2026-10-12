@@ -5,12 +5,14 @@
 2. Adzuna search API (US, Belgium, France, Netherlands).
 3. Google Jobs via SerpApi (optional).
 4. Job links inside newsletter emails (optional, via Gmail IMAP).
+   Gmail is also read for companies answering her applications.
 5. Reading a single posting from any link (for rows you add yourself).
 
 Every source returns the same job dict, built by make_job().
 """
 import datetime as dt
 import email
+import email.policy
 import email.utils
 import html
 import imaplib
@@ -875,6 +877,114 @@ def _write_mail_state(state: dict, keep_days: int = 120):
     settings.MAIL_STATE_FILE.parent.mkdir(exist_ok=True)
     settings.MAIL_STATE_FILE.write_text(json.dumps(state, indent=0, sort_keys=True),
                                        encoding="utf-8")
+
+
+# ─── Replies to her applications (Gmail IMAP) ────────────────────────────────
+def _gmail_raw(query: str) -> str:
+    """A Gmail search string, quoted for IMAP's X-GM-RAW."""
+    return '"' + query.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _read_json(path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def read_reply_state() -> dict:
+    return _read_json(settings.REPLY_STATE_FILE)
+
+
+def write_reply_state(state: dict, keep_days: int = 60):
+    cutoff = (dt.date.today() - dt.timedelta(days=keep_days)).isoformat()
+    state = {k: v for k, v in state.items() if v >= cutoff}
+    settings.REPLY_STATE_FILE.parent.mkdir(exist_ok=True)
+    settings.REPLY_STATE_FILE.write_text(json.dumps(state, indent=0, sort_keys=True),
+                                        encoding="utf-8")
+
+
+def _message_text(msg) -> str:
+    """The readable body of an email, plain text preferred."""
+    try:
+        part = msg.get_body(preferencelist=("plain", "html"))
+    except (AttributeError, KeyError):
+        part = None
+    if part is None:
+        return ""
+    try:
+        content = part.get_content()
+    except (LookupError, ValueError, AssertionError):
+        payload = part.get_payload(decode=True) or b""
+        content = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+    if part.get_content_type() == "text/html":
+        content = html_to_text(content)
+    return re.sub(r"\n\s*\n+", "\n\n", content or "").strip()
+
+
+def application_emails(query: str, lookback_days: int, skip_keys=(), max_emails: int = 30):
+    """Recent emails that may be a company answering one of her applications.
+
+    Uses Gmail's own search syntax over IMAP (X-GM-RAW), so the query in
+    config.yaml reads exactly like a search typed into Gmail. Emails already
+    handled (their Message-ID is in skip_keys) are not fetched again.
+
+    Returns a list of dicts, newest last, or None when Gmail could not be
+    read, so that a mail problem is never mistaken for "no replies".
+    """
+    if not (settings.GMAIL_ADDRESS and settings.GMAIL_APP_PASSWORD):
+        print("  [Replies] Skipped: GMAIL_ADDRESS / GMAIL_APP_PASSWORD not set")
+        return None
+    full_query = f"newer_than:{int(lookback_days)}d {query}".strip()
+    out = []
+    try:
+        box = imaplib.IMAP4_SSL("imap.gmail.com", timeout=IMAP_TIMEOUT)
+        box.login(settings.GMAIL_ADDRESS, settings.GMAIL_APP_PASSWORD)
+        mailbox = _all_mail_box(box)
+        if box.select(mailbox, readonly=True)[0] != "OK":
+            box.select("INBOX", readonly=True)
+        status, data = box.search(None, "X-GM-RAW", _gmail_raw(full_query))
+        if status != "OK":
+            print(f"  [Replies] Gmail refused the search: {data}")
+            box.logout()
+            return None
+        nums = data[0].split() if data and data[0] else []
+        for num in nums[-int(max_emails):]:
+            # Headers first: an email already handled costs one small fetch, not a full one.
+            _, head = box.fetch(num, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+            if head and isinstance(head[0], tuple):
+                key = clean(email.message_from_bytes(head[0][1]).get("Message-ID") or "")
+                if key and key in skip_keys:
+                    continue
+            _, msg_data = box.fetch(num, "(X-GM-THRID BODY.PEEK[])")
+            if not msg_data or not isinstance(msg_data[0], tuple):
+                continue
+            meta, raw = msg_data[0]
+            msg = email.message_from_bytes(raw, policy=email.policy.default)
+            key = clean(str(msg.get("Message-ID") or "")) or f"imap:{num.decode()}"
+            if key in skip_keys:
+                continue
+            thread = re.search(rb"X-GM-THRID (\d+)", meta or b"")
+            sender_name, sender_addr = email.utils.parseaddr(str(msg.get("From") or ""))
+            try:
+                when = email.utils.parsedate_to_datetime(str(msg.get("Date")))
+            except (TypeError, ValueError):
+                when = None
+            out.append({
+                "key": key,
+                "date": (when.date() if when else dt.date.today()).isoformat(),
+                "sender_name": clean(sender_name),
+                "sender": sender_addr.lower(),
+                "subject": clean(str(msg.get("Subject") or "")),
+                "body": _message_text(msg)[:6000],
+                "link": (f"https://mail.google.com/mail/u/0/#all/{int(thread.group(1)):x}"
+                         if thread else ""),
+            })
+        box.logout()
+    except (imaplib.IMAP4.error, OSError) as e:
+        print(f"  [Replies] Could not read Gmail: {e}")
+        return None
+    return out
 
 
 def newsletter_job_links():

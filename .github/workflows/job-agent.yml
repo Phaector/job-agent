@@ -15,7 +15,7 @@ on:
         description: "What to run"
         type: choice
         default: daily
-        options: [daily, light, letters, quiet, next, patterns, note, mailcheck]
+        options: [daily, light, letters, quiet, replies, next, patterns, note, mailcheck]
       count:
         description: "Rows to move from Queue to Suggested (mode 'next')"
         default: "10"
@@ -90,8 +90,10 @@ jobs:
             --page "${{ steps.mode.outputs.page }}" \
             ${{ inputs.dry_run && '--dry-run' || '' }}
 
-      - name: Remember screened postings and newsletter emails
-        if: steps.mode.outputs.mode == 'daily'
+      - name: Remember screened postings and emails already read
+        # Light runs read replies to your applications, so their state is kept too.
+        # A run that read nothing new changes nothing and commits nothing.
+        if: contains(fromJSON('["daily", "light", "replies"]'), steps.mode.outputs.mode) && !inputs.dry_run
         run: |
           git config user.name "job-agent"
           git config user.email "job-agent@users.noreply.github.com"
